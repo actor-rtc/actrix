@@ -797,6 +797,8 @@ async fn handle_actr_relay(
         source.serial_number, target.serial_number
     );
 
+    tracing::debug!(?relay, "handle_actr_relay");
+
     // 验证 credential
     if let Err(e) = AIdCredentialValidator::check(&relay.credential, source.realm.realm_id).await {
         warn!(
@@ -822,17 +824,28 @@ async fn handle_actr_relay(
     {
         let is_offerer = actor_order_key(&from) < actor_order_key(&to);
 
-        let assignment_for_from = RoleAssignment {
-            to: from.clone(),
-            is_offerer,
+        let new_relay = ActrRelay {
+            // source: peer actor (对端)，target: 该 assignment 的接收方
+            source: from.clone(),
+            credential: relay.credential.clone(),
+            target: to.clone(),
+            payload: Some(actr_relay::Payload::RoleAssignment(RoleAssignment {
+                is_offerer,
+            })),
         };
-        let assignment_for_to = RoleAssignment {
-            to: to.clone(),
-            is_offerer: !is_offerer,
+        send_role_assignment(&from, server, new_relay.clone()).await?;
+
+        let new_relay = ActrRelay {
+            // source: peer actor (对端)，target: 该 assignment 的接收方
+            source: from.clone(),
+            credential: relay.credential.clone(),
+            target: to.clone(),
+            payload: Some(actr_relay::Payload::RoleAssignment(RoleAssignment {
+                is_offerer: !is_offerer,
+            })),
         };
 
-        send_role_assignment(&from, assignment_for_from, server, &relay.credential).await?;
-        send_role_assignment(&to, assignment_for_to, server, &relay.credential).await?;
+        send_role_assignment(&to, server, new_relay).await?;
 
         return Ok(());
     }
@@ -877,17 +890,9 @@ fn actor_order_key(id: &ActrId) -> (u32, u64, String, String) {
 
 async fn send_role_assignment(
     target_actor: &ActrId,
-    assignment: RoleAssignment,
     server: &SignalingServerHandle,
-    credential: &AIdCredential,
+    relay: ActrRelay,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let relay = ActrRelay {
-        source: target_actor.clone(),
-        credential: credential.clone(),
-        target: target_actor.clone(),
-        payload: Some(actr_relay::Payload::RoleAssignment(assignment)),
-    };
-
     let flow = signaling_envelope::Flow::ActrRelay(relay);
     let envelope = server.create_new_envelope(flow);
 
