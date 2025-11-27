@@ -33,9 +33,9 @@
 
 use actr_protocol::{
     AIdCredential, ActrId, ActrRelay, ActrToSignaling, ActrType, ActrUpEvent, ErrorResponse,
-    PeerToSignaling, Ping, Pong, Realm, RegisterRequest, RegisterResponse, SignalingEnvelope,
-    SignalingToActr, actr_to_signaling, peer_to_signaling, register_response, signaling_envelope,
-    signaling_to_actr,
+    PeerToSignaling, Ping, Pong, Realm, RegisterRequest, RegisterResponse, RoleAssignment,
+    RoleNegotiation, SignalingEnvelope, SignalingToActr, actr_relay, actr_to_signaling,
+    peer_to_signaling, register_response, signaling_envelope, signaling_to_actr,
 };
 use actrix_common::aid::credential::validator::AIdCredentialValidator;
 use futures_util::{SinkExt, StreamExt};
@@ -797,6 +797,8 @@ async fn handle_actr_relay(
         source.serial_number, target.serial_number
     );
 
+    tracing::debug!(?relay, "handle_actr_relay");
+
     // 验证 credential
     if let Err(e) = AIdCredentialValidator::check(&relay.credential, source.realm.realm_id).await {
         warn!(
@@ -816,7 +818,39 @@ async fn handle_actr_relay(
         return Ok(());
     }
 
-    // 查找目标客户端并转发
+    // Role negotiation: server decides offerer/answerer and notifies both parties
+    if let Some(actr_relay::Payload::RoleNegotiation(RoleNegotiation { from, to, .. })) =
+        relay.payload.clone()
+    {
+        let is_offerer = actor_order_key(&from) < actor_order_key(&to);
+
+        let new_relay = ActrRelay {
+            // source: peer actor (对端)，target: 该 assignment 的接收方
+            source: from.clone(),
+            credential: relay.credential.clone(),
+            target: to.clone(),
+            payload: Some(actr_relay::Payload::RoleAssignment(RoleAssignment {
+                is_offerer,
+            })),
+        };
+        send_role_assignment(&from, server, new_relay.clone()).await?;
+
+        let new_relay = ActrRelay {
+            // source: peer actor (对端)，target: 该 assignment 的接收方
+            source: from.clone(),
+            credential: relay.credential.clone(),
+            target: to.clone(),
+            payload: Some(actr_relay::Payload::RoleAssignment(RoleAssignment {
+                is_offerer: !is_offerer,
+            })),
+        };
+
+        send_role_assignment(&to, server, new_relay).await?;
+
+        return Ok(());
+    }
+
+    // 查找目标客户端并转发其他中继消息
     let clients_guard = server.clients.read().await;
     let target_client = clients_guard.values().find(|client| {
         client.actor_id.as_ref().is_some_and(|id| {
@@ -842,6 +876,47 @@ async fn handle_actr_relay(
     }
 
     Ok(())
+}
+
+// 计算用于排序的 ActorId key，确保角色分配可重复
+fn actor_order_key(id: &ActrId) -> (u32, u64, String, String) {
+    (
+        id.realm.realm_id,
+        id.serial_number,
+        id.r#type.manufacturer.clone(),
+        id.r#type.name.clone(),
+    )
+}
+
+async fn send_role_assignment(
+    target_actor: &ActrId,
+    server: &SignalingServerHandle,
+    relay: ActrRelay,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let flow = signaling_envelope::Flow::ActrRelay(relay);
+    let envelope = server.create_new_envelope(flow);
+
+    let mut buf = Vec::new();
+    envelope.encode(&mut buf)?;
+
+    let clients_guard = server.clients.read().await;
+    if let Some(client) = clients_guard.values().find(|client| {
+        client.actor_id.as_ref().is_some_and(|id| {
+            id.realm.realm_id == target_actor.realm.realm_id
+                && id.serial_number == target_actor.serial_number
+        })
+    }) {
+        client
+            .direct_sender
+            .send(WsMessage::Binary(buf.into()))
+            .map_err(|e| e.into())
+    } else {
+        warn!(
+            "⚠️ send_role_assignment: 未找到目标 Actor {}",
+            target_actor.serial_number
+        );
+        Ok(())
+    }
 }
 
 /// 发送 SignalingEnvelope 到客户端
