@@ -30,6 +30,7 @@ actr-protocol = { workspace = true }
 # Protobuf
 prost = "0.14.1"
 prost-types = "0.14.1"
+base64 = { workspace = true }
 
 # 内部依赖
 actrix-common = { path = "../common" }

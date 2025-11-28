@@ -145,6 +145,7 @@ pub async fn handle_websocket_connection(
     websocket: WebSocket,
     server: SignalingServerHandle,
     client_ip: Option<std::net::IpAddr>,
+    url_identity: Option<(ActrId, AIdCredential)>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let client_id = Uuid::new_v4().to_string();
     info!(
@@ -161,12 +162,31 @@ pub async fn handle_websocket_connection(
     // 注册客户端（包含专用发送器）
     {
         let mut clients_guard = server.clients.write().await;
+
+        // 如果 URL 已带 actor_id，则移除已有相同 actor 的连接（避免 stale 映射）。
+        let (actor_for_entry, cred_for_entry) =
+            if let Some((actor_id, credential)) = url_identity.clone() {
+                let mut to_remove = Vec::new();
+                for (cid, conn) in clients_guard.iter() {
+                    if conn.actor_id.as_ref() == Some(&actor_id) {
+                        to_remove.push(cid.clone());
+                    }
+                }
+                for cid in to_remove {
+                    clients_guard.remove(&cid);
+                    info!("🧹 Removed stale client {} for actor {:?}", cid, actor_id);
+                }
+                (Some(actor_id), Some(credential))
+            } else {
+                (None, None)
+            };
+
         clients_guard.insert(
             client_id.clone(),
             ClientConnection {
                 id: client_id.clone(),
-                actor_id: None,
-                credential: None,
+                actor_id: actor_for_entry,
+                credential: cred_for_entry,
                 direct_sender: direct_tx,
                 client_ip,
             },
