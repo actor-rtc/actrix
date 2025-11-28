@@ -71,9 +71,9 @@ fn parse_all_config_modules(
         let entry = entry?;
         let path = entry.path();
 
-        if path.is_file() && path.extension().map_or(false, |ext| ext == "rs") {
+        if path.is_file() && path.extension().is_some_and(|ext| ext == "rs") {
             // Skip mod.rs since we already parsed it
-            if path.file_name().map_or(false, |name| name != "mod.rs") {
+            if path.file_name().is_some_and(|name| name != "mod.rs") {
                 parse_file_structs(&path, &mut structs)?;
             }
         } else if path.is_dir() {
@@ -110,7 +110,7 @@ fn parse_submodule_dir(
         let entry = entry?;
         let path = entry.path();
 
-        if path.is_file() && path.extension().map_or(false, |ext| ext == "rs") {
+        if path.is_file() && path.extension().is_some_and(|ext| ext == "rs") {
             parse_file_structs(&path, structs)?;
         }
     }

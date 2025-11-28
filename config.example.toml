@@ -30,6 +30,20 @@ name = "actrix-01"
 # - test: for automated testing
 env = "dev"
 
+# SQLite database storage directory path
+# Main database file will be stored as {sqlite_path}/actrix.db
+sqlite_path = "database"
+
+# Geographic location tag (for multi-region deployment monitoring)
+# Format: cloud-provider,region,zone
+# Examples: "aws,us-west-2,zone-a", "aliyun,beijing,zone-b"
+location_tag = "local,dev,default"
+
+# Shared PSK for inter-service authentication
+# IMPORTANT: Change this in production!
+# Generate a strong key: openssl rand -hex 32
+actrix_shared_key = "example-key-please-replace-with-secure-random-value-32chars+"
+
 # Observability (logging + tracing)
 [observability]
 # Unified filter for logs and tracing (EnvFilter syntax)
@@ -68,20 +82,6 @@ service_name = "actrix"
 #   - Grafana Tempo: http://tempo:4317
 #   - OpenTelemetry Collector: http://otel-collector:4317
 endpoint = "http://127.0.0.1:4317"
-
-# SQLite database storage directory path
-# Main database file will be stored as {sqlite_path}/actrix.db
-sqlite_path = "database"
-
-# Geographic location tag (for multi-region deployment monitoring)
-# Format: cloud-provider,region,zone
-# Examples: "aws,us-west-2,zone-a", "aliyun,beijing,zone-b"
-location_tag = "local,dev,default"
-
-# Shared PSK for inter-service authentication
-# IMPORTANT: Change this in production!
-# Generate a strong key: openssl rand -hex 32
-actrix_shared_key = "example-key-please-replace-with-secure-random-value-32chars+"
 
 # Process management (optional)
 # pid_file = "/var/run/actrix.pid"

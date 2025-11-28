@@ -201,7 +201,7 @@ impl ApplicationLauncher {
         }
 
         // 初始化可观测性系统（日志 + 追踪）
-        let _observability_guard = init_observability(config.observability_config())?;
+        let _observability_guard = init_observability(&config)?;
 
         // 写入 PID 文件（在绑定端口之前，需要权限）
         let pid_path = process::ProcessManager::write_pid_file(config.get_pid_path().as_deref())?;

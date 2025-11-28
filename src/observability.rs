@@ -1,4 +1,4 @@
-use actrix_common::config::ObservabilityConfig;
+use actrix_common::config::{ActrixConfig, ObservabilityConfig};
 use std::fs;
 use tracing_appender::non_blocking::{NonBlocking, WorkerGuard};
 use tracing_subscriber::{filter::EnvFilter, fmt, prelude::*};
@@ -7,13 +7,13 @@ use tracing_subscriber::{filter::EnvFilter, fmt, prelude::*};
 use crate::error::Error;
 use crate::error::Result;
 #[cfg(feature = "opentelemetry")]
+use opentelemetry::KeyValue;
+#[cfg(feature = "opentelemetry")]
 use opentelemetry_otlp::WithExportConfig;
 #[cfg(feature = "opentelemetry")]
 use opentelemetry_sdk::propagation::TraceContextPropagator;
 #[cfg(feature = "opentelemetry")]
 use opentelemetry_sdk::{Resource, trace::SdkTracerProvider};
-#[cfg(feature = "opentelemetry")]
-use tracing::error;
 
 /// Guard for observability resources (tracer provider and log writer)
 #[derive(Default)]
@@ -35,13 +35,15 @@ impl Drop for ObservabilityGuard {
 }
 
 /// Initialize logging and tracing based on configuration
-pub fn init_observability(config: &ObservabilityConfig) -> Result<ObservabilityGuard> {
+pub fn init_observability(config: &ActrixConfig) -> Result<ObservabilityGuard> {
     let mut guard = ObservabilityGuard::default();
+    let observability_config = config.observability_config();
 
-    match config.log.output.as_str() {
+    match observability_config.log.output.as_str() {
         "file" => {
-            fs::create_dir_all(&config.log.path)?;
-            let (non_blocking, worker_guard) = build_file_writer(&config.log, config.log.rotate)?;
+            fs::create_dir_all(&observability_config.log.path)?;
+            let (non_blocking, worker_guard) =
+                build_file_writer(&observability_config.log, observability_config.log.rotate)?;
             guard.log_guard = Some(worker_guard);
 
             init_subscriber_with_writer(non_blocking, false, &mut guard, config)?;
@@ -82,7 +84,7 @@ fn init_subscriber_with_writer<W>(
     use_ansi: bool,
     #[cfg_attr(not(feature = "opentelemetry"), allow(unused_variables))]
     guard: &mut ObservabilityGuard,
-    config: &ObservabilityConfig,
+    config: &ActrixConfig,
 ) -> Result<()>
 where
     W: for<'a> fmt::MakeWriter<'a> + Send + Sync + 'static,
@@ -95,25 +97,27 @@ where
         .with_ansi(use_ansi)
         .with_writer(writer);
 
+    let observability_config = config.observability_config();
+
     #[cfg(feature = "opentelemetry")]
     {
         let tracer_provider = build_tracing_provider(config)?;
 
         if let Some(provider) = tracer_provider {
             use opentelemetry::trace::TracerProvider as _;
-            let tracer = provider.tracer(config.tracing.service_name().to_string());
+            let tracer = provider.tracer(observability_config.tracing.service_name().to_string());
             guard.tracer_provider = Some(provider);
 
             // Global filter: events are filtered first, then passed to all layers
             tracing_subscriber::registry()
-                .with(create_env_filter(config))
+                .with(create_env_filter(observability_config))
                 .with(fmt_layer)
                 .with(tracing_opentelemetry::layer().with_tracer(tracer))
                 .try_init()
                 .ok();
         } else {
             tracing_subscriber::registry()
-                .with(create_env_filter(config))
+                .with(create_env_filter(observability_config))
                 .with(fmt_layer)
                 .try_init()
                 .ok();
@@ -123,7 +127,7 @@ where
     #[cfg(not(feature = "opentelemetry"))]
     {
         tracing_subscriber::registry()
-            .with(create_env_filter(config))
+            .with(create_env_filter(observability_config))
             .with(fmt_layer)
             .try_init()
             .ok();
@@ -137,18 +141,16 @@ fn build_file_writer(
     rotate: bool,
 ) -> Result<(NonBlocking, WorkerGuard)> {
     if rotate {
-        if log_config.output == "file" {
-            println!("日志写入模式: 文件");
-            println!("  - 路径: {}", log_config.path);
-            println!(
-                "  - 轮转: {}",
-                if rotate {
-                    "开启（按天）"
-                } else {
-                    "关闭"
-                }
-            );
-        }
+        println!("日志写入模式: 文件");
+        println!("  - 路径: {}", log_config.path);
+        println!(
+            "  - 轮转: {}",
+            if rotate {
+                "开启（按天）"
+            } else {
+                "关闭"
+            }
+        );
         let file_appender = tracing_appender::rolling::daily(&log_config.path, "actrix.log");
         Ok(tracing_appender::non_blocking(file_appender))
     } else {
@@ -162,8 +164,8 @@ fn build_file_writer(
 }
 
 #[cfg(feature = "opentelemetry")]
-fn build_tracing_provider(config: &ObservabilityConfig) -> Result<Option<SdkTracerProvider>> {
-    let tracing_cfg = &config.tracing;
+fn build_tracing_provider(config: &ActrixConfig) -> Result<Option<SdkTracerProvider>> {
+    let tracing_cfg = config.tracing_config();
 
     if !tracing_cfg.is_enabled() {
         println!("📊 OpenTelemetry tracing is disabled in config");
@@ -171,8 +173,7 @@ fn build_tracing_provider(config: &ObservabilityConfig) -> Result<Option<SdkTrac
     }
 
     if let Err(e) = tracing_cfg.validate() {
-        error!("OpenTelemetry configuration validation failed: {}", e);
-        return Ok(None);
+        return Err(Error::custom(e));
     }
 
     println!(
@@ -189,6 +190,11 @@ fn build_tracing_provider(config: &ObservabilityConfig) -> Result<Option<SdkTrac
 
     let resource = Resource::builder()
         .with_service_name(tracing_cfg.service_name().to_string())
+        .with_attributes([
+            KeyValue::new("service.instance.id", config.name.clone()),
+            KeyValue::new("service.environment", config.env.clone()),
+            KeyValue::new("service.location", config.location_tag.clone()),
+        ])
         .build();
 
     let tracer_provider = SdkTracerProvider::builder()

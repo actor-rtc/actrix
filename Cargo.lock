@@ -21,7 +21,7 @@ dependencies = [
 [[package]]
 name = "actr-protocol"
 version = "0.1.4"
-source = "git+https://github.com/actor-rtc/actr?rev=1aef3585fc7d80993e6f61dc42223053242091ea#1aef3585fc7d80993e6f61dc42223053242091ea"
+source = "git+https://github.com/actor-rtc/actr?rev=f213096aa5168322a382670b20edf67aa284ff9c#f213096aa5168322a382670b20edf67aa284ff9c"
 dependencies = [
  "bytes",
  "chrono",
