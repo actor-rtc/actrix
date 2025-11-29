@@ -394,7 +394,7 @@ async fn handle_register_request(
         }
     };
 
-    let (actor_id, credential) = match ais_client
+    let register_ok = match ais_client
         .refresh_credential(request.realm.realm_id, request.actr_type.clone())
         .await
     {
@@ -406,7 +406,7 @@ async fn handle_register_request(
                         "✅ AIS 分配 ActorId: realm={}, serial={}",
                         register_ok.actr_id.realm.realm_id, register_ok.actr_id.serial_number
                     );
-                    (register_ok.actr_id, register_ok.credential)
+                    register_ok
                 }
                 Some(register_response::Result::Error(err)) => {
                     error!(
@@ -461,7 +461,10 @@ async fn handle_register_request(
             .as_ref()
             .and_then(|spec| spec.description.clone())
             .unwrap_or_else(|| {
-                format!("{}/{}", actor_id.r#type.manufacturer, actor_id.r#type.name)
+                format!(
+                    "{}/{}",
+                    register_ok.actr_id.r#type.manufacturer, register_ok.actr_id.r#type.name
+                )
             });
 
         // 从 ServiceSpec 中提取 message_types（proto packages）
@@ -477,7 +480,7 @@ async fn handle_register_request(
             .unwrap_or_default();
 
         if let Err(e) = registry.register_service_full(
-            actor_id.clone(),
+            register_ok.actr_id.clone(),
             service_name,
             message_types,
             None, // capabilities 当前不使用
@@ -488,7 +491,7 @@ async fn handle_register_request(
         } else {
             info!(
                 "✅ 服务已注册到 ServiceRegistry (serial={})",
-                actor_id.serial_number
+                register_ok.actr_id.serial_number
             );
         }
         drop(registry);
@@ -498,27 +501,19 @@ async fn handle_register_request(
     {
         let mut clients_guard = server.clients.write().await;
         if let Some(client) = clients_guard.get_mut(client_id) {
-            client.actor_id = Some(actor_id.clone());
-            client.credential = Some(credential.clone());
+            client.actor_id = Some(register_ok.actr_id.clone());
+            client.credential = Some(register_ok.credential.clone());
         }
     }
 
-    // 创建成功响应
-    let register_ok = register_response::RegisterOk {
-        actr_id: actor_id.clone(),
-        credential: credential.clone(),
-        psk: None,                             // PSK 当前不使用
-        credential_expires_at: None,           // 当前不设置过期时间
-        signaling_heartbeat_interval_secs: 30, // 30 秒心跳间隔
-    };
-
+    // 直接使用 AIS 返回的 register_ok（包含 psk 和 public_key）
     let response = RegisterResponse {
-        result: Some(register_response::Result::Success(register_ok)),
+        result: Some(register_response::Result::Success(register_ok.clone())),
     };
 
     // 构造 SignalingToActr 流程
     let flow = signaling_envelope::Flow::ServerToActr(SignalingToActr {
-        target: actor_id.clone(),
+        target: register_ok.actr_id.clone(),
         payload: Some(signaling_to_actr::Payload::RegisterResponse(response)),
     });
 
@@ -538,19 +533,19 @@ async fn handle_register_request(
 
     // 通知所有订阅了该 ActrType 的订阅者
     let presence = server.presence_manager.read().await;
-    let subscribers = presence.get_subscribers(&actor_id.r#type);
+    let subscribers = presence.get_subscribers(&register_ok.actr_id.r#type);
 
     if !subscribers.is_empty() {
         info!(
             "📢 Actor {}/{} 上线，通知 {} 个订阅者",
-            actor_id.r#type.manufacturer,
-            actor_id.r#type.name,
+            register_ok.actr_id.r#type.manufacturer,
+            register_ok.actr_id.r#type.name,
             subscribers.len()
         );
 
         // 构造 ActrUpEvent
         let actr_up_event = ActrUpEvent {
-            actor_id: actor_id.clone(),
+            actor_id: register_ok.actr_id.clone(),
         };
 
         // 为每个订阅者构造并发送通知
