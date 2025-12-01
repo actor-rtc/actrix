@@ -30,7 +30,7 @@ impl<B> MakeSpan<B> for HttpMakeSpan {
 
         #[cfg(feature = "opentelemetry")]
         if let Some(context) = extract_remote_context(request.headers()) {
-            span.set_parent(context);
+            let _ = span.set_parent(context);
         }
 
         span

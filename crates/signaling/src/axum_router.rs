@@ -3,7 +3,6 @@
 //! 提供 SignalingServer 的 Axum Router 适配器
 
 use crate::server::{SignalingServer, SignalingServerHandle};
-use actr_protocol::ActrIdExt;
 use actrix_common::aid::credential::validator::AIdCredentialValidator;
 use actrix_common::config::ActrixConfig;
 use anyhow::{Context as _, Result};
@@ -303,6 +302,7 @@ async fn handle_websocket(
     // 创建 SignalingServerHandle
     let server_handle = SignalingServerHandle {
         clients: state.server.clients.clone(),
+        actor_id_index: state.server.actor_id_index.clone(),
         service_registry: state.server.service_registry.clone(),
         presence_manager: state.server.presence_manager.clone(),
         ais_client: state.server.ais_client.clone(),

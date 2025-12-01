@@ -43,7 +43,7 @@ use prost::Message as ProstMessage;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, info_span, instrument, warn};
 use uuid::Uuid;
 
 // Axum WebSocket
@@ -52,12 +52,17 @@ use axum::extract::ws::{Message as WsMessage, WebSocket};
 use crate::load_balancer::LoadBalancer;
 use crate::presence::PresenceManager;
 use crate::service_registry::ServiceRegistry;
+#[cfg(feature = "opentelemetry")]
+use crate::trace::{extract_trace_context, inject_trace_context};
+use tracing::Instrument;
 
 /// 信令服务器状态
 #[derive(Debug)]
 pub struct SignalingServer {
     /// 已连接的客户端
     pub clients: Arc<RwLock<HashMap<String, ClientConnection>>>,
+    /// 通过 ActorId 查找 client_id 的索引
+    pub actor_id_index: Arc<RwLock<HashMap<ActrId, String>>>,
     /// 服务注册表
     pub service_registry: Arc<RwLock<ServiceRegistry>>,
     /// Presence 订阅管理器
@@ -86,6 +91,7 @@ pub struct ClientConnection {
 #[derive(Debug, Clone)]
 pub struct SignalingServerHandle {
     pub clients: Arc<RwLock<HashMap<String, ClientConnection>>>,
+    pub actor_id_index: Arc<RwLock<HashMap<ActrId, String>>>,
     pub service_registry: Arc<RwLock<ServiceRegistry>>,
     pub presence_manager: Arc<RwLock<PresenceManager>>,
     pub ais_client: Option<Arc<crate::ais_client::AisClient>>,
@@ -96,12 +102,14 @@ pub struct SignalingServerHandle {
 
 impl SignalingServerHandle {
     /// 创建 SignalingEnvelope
+    #[instrument(level = "debug", skip_all, fields(reply_for))]
     fn create_envelope(
         &self,
         flow: signaling_envelope::Flow,
         reply_for: Option<&str>,
     ) -> SignalingEnvelope {
-        SignalingEnvelope {
+        #[allow(unused_mut)]
+        let mut envelope = SignalingEnvelope {
             envelope_version: 1,
             envelope_id: Uuid::new_v4().to_string(),
             reply_for: reply_for.map(|id| id.to_string()),
@@ -109,10 +117,18 @@ impl SignalingServerHandle {
                 seconds: chrono::Utc::now().timestamp(),
                 nanos: 0,
             },
+            traceparent: None,
+            tracestate: None,
             flow: Some(flow),
-        }
+        };
+        debug!(
+            "Created envelope: envelope_id={}, reply_for={reply_for:?}",
+            envelope.envelope_id,
+        );
+        envelope
     }
 
+    #[instrument(level = "debug", skip_all)]
     fn create_new_envelope(&self, flow: signaling_envelope::Flow) -> SignalingEnvelope {
         self.create_envelope(flow, None)
     }
@@ -128,6 +144,7 @@ impl SignalingServer {
     pub fn new() -> Self {
         Self {
             clients: Arc::new(RwLock::new(HashMap::new())),
+            actor_id_index: Arc::new(RwLock::new(HashMap::new())),
             service_registry: Arc::new(RwLock::new(ServiceRegistry::new())),
             presence_manager: Arc::new(RwLock::new(PresenceManager::new())),
             ais_client: None, // 在 axum_router 中初始化
@@ -284,34 +301,69 @@ async fn handle_client_envelope(
     // 解码 protobuf 消息
     let envelope = SignalingEnvelope::decode(data)?;
 
-    info!("📨 收到信令消息 envelope_id={}", envelope.envelope_id);
+    #[cfg(feature = "opentelemetry")]
+    let remote_context = extract_trace_context(&envelope);
 
-    // 根据流向处理消息
-    match envelope.flow {
-        Some(signaling_envelope::Flow::PeerToServer(peer_to_server)) => {
-            handle_peer_to_server(peer_to_server, client_id, server, &envelope.envelope_id).await?;
-        }
-        Some(signaling_envelope::Flow::ActrToServer(actr_to_server)) => {
-            handle_actr_to_server(actr_to_server, client_id, server, &envelope.envelope_id).await?;
-        }
-        Some(signaling_envelope::Flow::ActrRelay(relay)) => {
-            handle_actr_relay(relay, client_id, server, &envelope.envelope_id).await?;
-        }
-        Some(signaling_envelope::Flow::EnvelopeError(error)) => {
-            error!(
-                "收到 envelope 错误: code={}, message={}",
-                error.code, error.message
-            );
-        }
-        _ => {
-            warn!("未知的信令流向");
-        }
+    let span = info_span!(
+        "signaling.handle_envelope",
+        envelope_id = %envelope.envelope_id,
+        client_id = %client_id
+    );
+    #[cfg(feature = "opentelemetry")]
+    {
+        use tracing_opentelemetry::OpenTelemetrySpanExt;
+        let _ = span.set_parent(remote_context.clone());
     }
 
-    Ok(())
+    async move {
+        debug!("📨 收到信令消息 envelope_id={}", envelope.envelope_id);
+
+        // 根据流向处理消息
+        match envelope.flow {
+            Some(signaling_envelope::Flow::PeerToServer(peer_to_server)) => {
+                handle_peer_to_server(peer_to_server, client_id, server, &envelope.envelope_id)
+                    .await
+            }
+            Some(signaling_envelope::Flow::ActrToServer(actr_to_server)) => {
+                handle_actr_to_server(actr_to_server, client_id, server, &envelope.envelope_id)
+                    .await
+            }
+            Some(signaling_envelope::Flow::ActrRelay(ref relay)) => {
+                #[cfg(feature = "opentelemetry")]
+                {
+                    handle_actr_relay(
+                        relay.clone(),
+                        client_id,
+                        server,
+                        &envelope.envelope_id,
+                        remote_context,
+                    )
+                    .await
+                }
+                #[cfg(not(feature = "opentelemetry"))]
+                {
+                    handle_actr_relay(relay.clone(), client_id, server, &envelope.envelope_id).await
+                }
+            }
+            Some(signaling_envelope::Flow::EnvelopeError(error)) => {
+                error!(
+                    "收到 envelope 错误: code={}, message={}",
+                    error.code, error.message
+                );
+                Ok(())
+            }
+            _ => {
+                warn!("未知的信令流向");
+                Ok(())
+            }
+        }
+    }
+    .instrument(span)
+    .await
 }
 
 /// 处理 PeerToSignaling 流程（注册前）
+#[instrument(level = "debug", skip_all, fields(client_id, envelope_id = request_envelope_id))]
 async fn handle_peer_to_server(
     peer_to_server: PeerToSignaling,
     client_id: &str,
@@ -331,6 +383,7 @@ async fn handle_peer_to_server(
 }
 
 /// 处理注册请求
+#[instrument(level = "debug", skip_all, fields(client_id, envelope_id = request_envelope_id))]
 async fn handle_register_request(
     request: RegisterRequest,
     client_id: &str,
@@ -497,7 +550,10 @@ async fn handle_register_request(
         drop(registry);
     }
 
-    // 更新客户端信息
+    // 更新客户端信息和 ActorId 索引
+    // Hold clients lock until actor_id_index update completes to prevent race condition
+    // where cleanup_client removes the client between releasing clients lock and
+    // acquiring actor_id_index lock, leading to stale index entries.
     {
         let mut clients_guard = server.clients.write().await;
         if let Some(client) = clients_guard.get_mut(client_id) {
@@ -518,16 +574,7 @@ async fn handle_register_request(
     });
 
     // 创建响应 envelope
-    let response_envelope = SignalingEnvelope {
-        envelope_version: 1,
-        envelope_id: Uuid::new_v4().to_string(),
-        reply_for: Some(request_envelope_id.to_string()),
-        timestamp: prost_types::Timestamp {
-            seconds: chrono::Utc::now().timestamp(),
-            nanos: 0,
-        },
-        flow: Some(flow),
-    };
+    let response_envelope = server.create_envelope(flow, Some(request_envelope_id));
 
     send_envelope_to_client(client_id, response_envelope, server).await?;
 
@@ -550,45 +597,33 @@ async fn handle_register_request(
 
         // 为每个订阅者构造并发送通知
         for subscriber_id in subscribers {
-            // 查找订阅者的 client_id
-            let clients = server.clients.read().await;
-            let subscriber_client_id = clients
-                .iter()
-                .find(|(_, client)| client.actor_id.as_ref() == Some(subscriber_id))
-                .map(|(cid, _)| cid.clone());
-            drop(clients);
-
-            if let Some(subscriber_client_id) = subscriber_client_id {
-                let flow = signaling_envelope::Flow::ServerToActr(SignalingToActr {
-                    target: subscriber_id.clone(),
-                    payload: Some(signaling_to_actr::Payload::ActrUpEvent(
-                        actr_up_event.clone(),
-                    )),
-                });
-
-                let event_envelope = SignalingEnvelope {
-                    envelope_version: 1,
-                    envelope_id: Uuid::new_v4().to_string(),
-                    reply_for: None, // 这是主动推送的事件，不是对请求的回复
-                    timestamp: prost_types::Timestamp {
-                        seconds: chrono::Utc::now().timestamp(),
-                        nanos: 0,
-                    },
-                    flow: Some(flow),
+            let subscriber_client_id =
+                match resolve_client_id_by_actor_id(subscriber_id, server).await {
+                    Ok(id) => id,
+                    Err(e) => {
+                        warn!(
+                            "⚠️  订阅者 {} 索引缺失或不一致: {}",
+                            subscriber_id.serial_number, e
+                        );
+                        continue;
+                    }
                 };
 
-                if let Err(e) =
-                    send_envelope_to_client(&subscriber_client_id, event_envelope, server).await
-                {
-                    warn!(
-                        "⚠️  发送 ActrUpEvent 到订阅者 {} 失败: {}",
-                        subscriber_id.serial_number, e
-                    );
-                }
-            } else {
+            let flow = signaling_envelope::Flow::ServerToActr(SignalingToActr {
+                target: subscriber_id.clone(),
+                payload: Some(signaling_to_actr::Payload::ActrUpEvent(
+                    actr_up_event.clone(),
+                )),
+            });
+
+            let event_envelope = server.create_new_envelope(flow);
+
+            if let Err(e) =
+                send_envelope_to_client(&subscriber_client_id, event_envelope, server).await
+            {
                 warn!(
-                    "⚠️  订阅者 {} 未找到对应的 WebSocket 连接",
-                    subscriber_id.serial_number
+                    "⚠️  发送 ActrUpEvent 到订阅者 {} 失败: {}",
+                    subscriber_id.serial_number, e
                 );
             }
         }
@@ -599,6 +634,7 @@ async fn handle_register_request(
 }
 
 /// 发送注册错误响应
+#[instrument(level = "debug", skip_all, fields(client_id, envelope_id = request_envelope_id))]
 async fn send_register_error(
     client_id: &str,
     code: u32,
@@ -630,16 +666,7 @@ async fn send_register_error(
         payload: Some(signaling_to_actr::Payload::RegisterResponse(response)),
     });
 
-    let response_envelope = SignalingEnvelope {
-        envelope_version: 1,
-        envelope_id: Uuid::new_v4().to_string(),
-        reply_for: Some(request_envelope_id.to_string()),
-        timestamp: prost_types::Timestamp {
-            seconds: chrono::Utc::now().timestamp(),
-            nanos: 0,
-        },
-        flow: Some(flow),
-    };
+    let response_envelope = server.create_envelope(flow, Some(request_envelope_id));
 
     send_envelope_to_client(client_id, response_envelope, server).await?;
 
@@ -647,6 +674,7 @@ async fn send_register_error(
 }
 
 /// 处理 ActrToSignaling 流程（注册后）
+#[instrument(level = "debug", skip_all, fields(client_id, envelope_id = request_envelope_id))]
 async fn handle_actr_to_server(
     actr_to_server: ActrToSignaling,
     client_id: &str,
@@ -763,6 +791,7 @@ async fn handle_ping(
 }
 
 /// 处理注销
+#[instrument(level = "debug", skip_all, fields(client_id, envelope_id = request_envelope_id))]
 async fn handle_unregister(
     source: ActrId,
     req: actr_protocol::UnregisterRequest,
@@ -797,12 +826,55 @@ async fn handle_unregister(
     Ok(())
 }
 
+/// 通过 actor_id_index 快速解析 client_id，保持索引与 clients 同步
+async fn resolve_client_id_by_actor_id(
+    actor_id: &ActrId,
+    server: &SignalingServerHandle,
+) -> Result<String, String> {
+    let client_id = {
+        let index_guard = server.actor_id_index.read().await;
+        index_guard.get(actor_id).cloned()
+    };
+
+    let client_id = match client_id {
+        Some(id) => id,
+        None => {
+            warn!(
+                "⚠️  Actor {} 缺少 client_id 索引，可能尚未注册或已清理",
+                format_actor_id(actor_id)
+            );
+            return Err("client_id not found for actor_id".into());
+        }
+    };
+
+    let exists = server.clients.read().await.contains_key(&client_id);
+    if !exists {
+        warn!(
+            "⚠️  Actor {} 索引指向不存在的客户端 {}，索引可能已过期",
+            format_actor_id(actor_id),
+            client_id
+        );
+        return Err("actor_id_index stale for actor_id".into());
+    }
+
+    Ok(client_id)
+}
+
+fn format_actor_id(actor_id: &ActrId) -> String {
+    format!(
+        "realm={} serial={}",
+        actor_id.realm.realm_id, actor_id.serial_number
+    )
+}
+
 /// 处理 ActrRelay（WebRTC 信令中继）
+#[instrument(level = "debug", skip_all, fields(client_id, envelope_id = request_envelope_id))]
 async fn handle_actr_relay(
     relay: ActrRelay,
     client_id: &str,
     server: &SignalingServerHandle,
     request_envelope_id: &str,
+    #[cfg(feature = "opentelemetry")] remote_context: opentelemetry::Context,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let source = relay.source.clone();
     let target = &relay.target;
@@ -935,14 +1007,22 @@ async fn send_role_assignment(
 }
 
 /// 发送 SignalingEnvelope 到客户端
+#[instrument(level = "debug", skip_all, fields(client_id, envelope_id = envelope.envelope_id))]
 async fn send_envelope_to_client(
     client_id: &str,
-    envelope: SignalingEnvelope,
+    #[allow(unused_mut)] mut envelope: SignalingEnvelope,
     server: &SignalingServerHandle,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let clients_guard = server.clients.read().await;
 
     if let Some(client) = clients_guard.get(client_id) {
+        #[cfg(feature = "opentelemetry")]
+        {
+            use tracing_opentelemetry::OpenTelemetrySpanExt;
+            let context = tracing::Span::current().context();
+            inject_trace_context(&context, &mut envelope);
+        }
+
         // 编码 protobuf
         let mut buf = Vec::new();
         envelope.encode(&mut buf)?;
@@ -966,8 +1046,12 @@ async fn send_envelope_to_client(
 
 /// 清理客户端连接
 async fn cleanup_client(client_id: &str, server: &SignalingServerHandle) {
-    let mut clients_guard = server.clients.write().await;
-    if let Some(client) = clients_guard.remove(client_id) {
+    let removed_client = {
+        let mut clients_guard = server.clients.write().await;
+        clients_guard.remove(client_id)
+    };
+
+    if let Some(client) = removed_client {
         if let Some(actor_id) = client.actor_id {
             info!("🧹 清理 Actor {} 的连接", actor_id.serial_number);
 
@@ -977,6 +1061,16 @@ async fn cleanup_client(client_id: &str, server: &SignalingServerHandle) {
                 .write()
                 .await
                 .unregister_actor(&actor_id);
+
+            let mut actor_index = server.actor_id_index.write().await;
+            match actor_index.remove(&actor_id) {
+                Some(mapped_client) if mapped_client != client_id => warn!(
+                    "⚠️  Actor {} 索引指向意外客户端 {}，已移除",
+                    actor_id.serial_number, mapped_client
+                ),
+                None => warn!("⚠️  Actor {} 清理时未找到索引条目", actor_id.serial_number),
+                _ => {}
+            }
         }
 
         // 移除消息速率限制器
@@ -987,6 +1081,7 @@ async fn cleanup_client(client_id: &str, server: &SignalingServerHandle) {
 }
 
 /// 处理 Credential 更新请求
+#[instrument(level = "debug", skip_all, fields(client_id, envelope_id = request_envelope_id))]
 async fn handle_credential_update(
     source: ActrId,
     _req: actr_protocol::CredentialUpdateRequest,
@@ -1125,6 +1220,7 @@ async fn handle_credential_update(
 }
 
 /// 处理服务发现请求
+#[instrument(level = "debug", skip_all, fields(client_id, envelope_id = request_envelope_id))]
 async fn handle_discovery_request(
     source: ActrId,
     req: actr_protocol::DiscoveryRequest,
@@ -1203,6 +1299,7 @@ async fn handle_discovery_request(
 }
 
 /// 处理路由候选请求（负载均衡）
+#[instrument(level = "debug", skip_all, fields(client_id, envelope_id = request_envelope_id))]
 async fn handle_route_candidates_request(
     source: ActrId,
     req: actr_protocol::RouteCandidatesRequest,
@@ -1293,6 +1390,7 @@ async fn handle_route_candidates_request(
 }
 
 /// 处理订阅 Actor 上线事件
+#[instrument(level = "debug", skip_all, fields(client_id, envelope_id = request_envelope_id))]
 async fn handle_subscribe_actr_up(
     source: ActrId,
     req: actr_protocol::SubscribeActrUpRequest,
@@ -1330,6 +1428,7 @@ async fn handle_subscribe_actr_up(
 }
 
 /// 处理取消订阅 Actor 上线事件
+#[instrument(level = "debug", skip_all, fields(client_id, envelope_id = request_envelope_id))]
 async fn handle_unsubscribe_actr_up(
     source: ActrId,
     req: actr_protocol::UnsubscribeActrUpRequest,
@@ -1376,6 +1475,7 @@ async fn handle_unsubscribe_actr_up(
 }
 
 /// 发送通用错误响应
+#[instrument(level = "debug", skip_all, fields(client_id, reply_for = ?reply_for, target = ?target))]
 async fn send_error_response(
     client_id: &str,
     target: &ActrId,
