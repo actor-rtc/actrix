@@ -2,8 +2,8 @@
 //!
 //! 提供 ActrId 注册和 Token 签发的 HTTP API 服务
 
-use crate::service::ServiceType;
-use crate::service::{HttpRouterService, info::ServiceInfo};
+use crate::service::HttpRouterService;
+use actrix_common::{ServiceInfo, ServiceType};
 use actrix_common::config::ActrixConfig;
 use ais::create_ais_router;
 use anyhow::Result;

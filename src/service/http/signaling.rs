@@ -1,7 +1,7 @@
 //! Signaling WebSocket服务实现
 
-use crate::service::ServiceType;
-use crate::service::{HttpRouterService, info::ServiceInfo};
+use crate::service::HttpRouterService;
+use actrix_common::{ServiceInfo, ServiceType};
 use actrix_common::config::ActrixConfig;
 use anyhow::Result;
 use async_trait::async_trait;
