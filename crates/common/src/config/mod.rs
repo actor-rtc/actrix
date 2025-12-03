@@ -137,6 +137,12 @@ pub struct ActrixConfig {
     /// 将日志和 OpenTelemetry 追踪配置合并到统一的 observability 段，便于统一管理。
     #[serde(default)]
     pub observability: ObservabilityConfig,
+
+    /// ACL (Access Control List) 配置
+    ///
+    /// 配置访问控制策略，用于 Presence 通知、服务发现和 WebRTC 中继。
+    #[serde(default)]
+    pub acl: AclConfig,
 }
 
 /// 可观测性配置
@@ -157,6 +163,37 @@ pub struct ObservabilityConfig {
     /// 需要编译时启用 `opentelemetry` feature。
     #[serde(default)]
     pub tracing: TracingConfig,
+}
+
+/// ACL (Access Control List) 配置
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct AclConfig {
+    /// Default policy when no ACL rule exists
+    ///
+    /// - "deny": Deny discovery/relay if no ACL rule found (recommended, secure by default)
+    /// - "allow": Allow discovery/relay if no ACL rule found (insecure, use only for testing)
+    #[serde(default = "default_acl_policy")]
+    pub default_policy: AclPolicy,
+}
+
+/// ACL default policy
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum AclPolicy {
+    Allow,
+    Deny,
+}
+
+impl Default for AclConfig {
+    fn default() -> Self {
+        Self {
+            default_policy: default_acl_policy(),
+        }
+    }
+}
+
+fn default_acl_policy() -> AclPolicy {
+    AclPolicy::Deny // Secure by default
 }
 
 /// 日志配置
@@ -253,6 +290,7 @@ impl Default for ActrixConfig {
             sqlite_path: PathBuf::from("database"),
             actrix_shared_key: "XDDYE8d+yMfdXcdWMrXprcUk2uzjnmoX6nCfFw1gGIg=".to_string(),
             observability: ObservabilityConfig::default(),
+            acl: AclConfig::default(),
         }
     }
 }

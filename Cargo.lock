@@ -21,7 +21,7 @@ dependencies = [
 [[package]]
 name = "actr-protocol"
 version = "0.1.5"
-source = "git+https://github.com/actor-rtc/actr?rev=00618c733d25a8586b09aa84eedd4a88396a6b8e#00618c733d25a8586b09aa84eedd4a88396a6b8e"
+source = "git+https://github.com/actor-rtc/actr?rev=7a79a5b8729463e0921ab4fef8926d808907833e#7a79a5b8729463e0921ab4fef8926d808907833e"
 dependencies = [
  "bytes",
  "chrono",
@@ -3868,6 +3868,7 @@ dependencies = [
  "actrix-common",
  "anyhow",
  "axum",
+ "base64 0.22.1",
  "bytes",
  "chrono",
  "futures-util",
@@ -3878,6 +3879,7 @@ dependencies = [
  "reqwest 0.11.27",
  "serde",
  "serde_json",
+ "serial_test",
  "sqlx",
  "thiserror 2.0.17",
  "tokio",
@@ -5993,3 +5995,8 @@ dependencies = [
  "quote",
  "syn 2.0.108",
 ]
+
+[[patch.unused]]
+name = "actr-framework"
+version = "0.1.4"
+source = "git+https://github.com/actor-rtc/actr?rev=7a79a5b8729463e0921ab4fef8926d808907833e#7a79a5b8729463e0921ab4fef8926d808907833e"

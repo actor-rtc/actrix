@@ -77,6 +77,10 @@ pub async fn create_signaling_router_with_config(config: &ActrixConfig) -> Resul
 
     // 创建 SignalingServer
     let mut server = SignalingServer::new();
+    
+    // 设置 ACL 配置
+    server.set_acl_config(config.acl.clone());
+    info!("✅ ACL enforcement active with default policy: {:?}", config.acl.default_policy);
 
     // 初始化 ServiceRegistry 持久化缓存（用于重启恢复）
     let cache_ttl_secs = 3600; // 1 小时 TTL
@@ -309,6 +313,7 @@ async fn handle_websocket(
         compatibility_cache: state.server.compatibility_cache.clone(),
         connection_rate_limiter: state.server.connection_rate_limiter.clone(),
         message_rate_limiter: state.server.message_rate_limiter.clone(),
+        acl_config: state.server.acl_config.clone(),
     };
 
     // 调用 SignalingServer 的 WebSocket 处理函数

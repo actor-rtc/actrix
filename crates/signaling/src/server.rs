@@ -75,6 +75,8 @@ pub struct SignalingServer {
     pub connection_rate_limiter: Option<Arc<crate::ratelimit::ConnectionRateLimiter>>,
     /// 消息速率限制器
     pub message_rate_limiter: Option<Arc<crate::ratelimit::MessageRateLimiter>>,
+    /// ACL 配置
+    pub acl_config: actrix_common::config::AclConfig,
 }
 
 /// 客户端连接信息
@@ -98,6 +100,7 @@ pub struct SignalingServerHandle {
     pub compatibility_cache: Arc<RwLock<crate::compatibility_cache::GlobalCompatibilityCache>>,
     pub connection_rate_limiter: Option<Arc<crate::ratelimit::ConnectionRateLimiter>>,
     pub message_rate_limiter: Option<Arc<crate::ratelimit::MessageRateLimiter>>,
+    pub acl_config: actrix_common::config::AclConfig,
 }
 
 impl SignalingServerHandle {
@@ -153,7 +156,13 @@ impl SignalingServer {
             )),
             connection_rate_limiter: None, // 在 axum_router 中根据配置初始化
             message_rate_limiter: None,    // 在 axum_router 中根据配置初始化
+            acl_config: actrix_common::config::AclConfig::default(),
         }
+    }
+    
+    /// 设置 ACL 配置
+    pub fn set_acl_config(&mut self, config: actrix_common::config::AclConfig) {
+        self.acl_config = config;
     }
 }
 
@@ -550,6 +559,57 @@ async fn handle_register_request(
         drop(registry);
     }
 
+    // 持久化 ACL 规则到数据库
+    if let Some(ref acl) = request.acl {
+        use actrix_common::tenant::acl::ActorAcl;
+        
+        let tenant_id = register_ok.actr_id.realm.realm_id.to_string();
+        let my_type = &register_ok.actr_id.r#type.name;
+        
+        for rule in &acl.rules {
+            // actr_protocol::Acl 是反向设计：principals 可以访问"我"
+            // 需要转换为数据库的正向设计：from_type -> to_type
+            let permission = rule.permission == actr_protocol::acl_rule::Permission::Allow as i32;
+            
+            for principal in &rule.principals {
+                // 提取 principal 的类型（如果没有则跳过）
+                let from_type = match &principal.actr_type {
+                    Some(actr_type) => &actr_type.name,
+                    None => {
+                        warn!("⚠️  ACL principal 缺少 actr_type，跳过");
+                        continue;
+                    }
+                };
+                
+                // 保存规则：from_type (principal) -> to_type (me)
+                let mut actor_acl = ActorAcl::new(
+                    tenant_id.clone(),
+                    from_type.to_string(),
+                    my_type.to_string(),
+                    permission,
+                );
+                
+                match actor_acl.save().await {
+                    Ok(acl_id) => {
+                        info!(
+                            "✅ ACL 规则已保存: {} -> {} : {} (id={})",
+                            from_type,
+                            my_type,
+                            if permission { "ALLOW" } else { "DENY" },
+                            acl_id
+                        );
+                    }
+                    Err(e) => {
+                        warn!(
+                            "⚠️  保存 ACL 规则失败 ({} -> {}): {}",
+                            from_type, my_type, e
+                        );
+                    }
+                }
+            }
+        }
+    }
+
     // 更新客户端信息和 ActorId 索引
     // Hold clients lock until actor_id_index update completes to prevent race condition
     // where cleanup_client removes the client between releasing clients lock and
@@ -578,13 +638,13 @@ async fn handle_register_request(
 
     send_envelope_to_client(client_id, response_envelope, server).await?;
 
-    // 通知所有订阅了该 ActrType 的订阅者
+    // 通知所有订阅了该 ActrType 的订阅者（带 ACL 过滤）
     let presence = server.presence_manager.read().await;
-    let subscribers = presence.get_subscribers(&register_ok.actr_id.r#type);
+    let subscribers = presence.get_subscribers_with_acl(&register_ok.actr_id).await;
 
     if !subscribers.is_empty() {
         info!(
-            "📢 Actor {}/{} 上线，通知 {} 个订阅者",
+            "📢 Actor {}/{} 上线，通知 {} 个 ACL 授权的订阅者",
             register_ok.actr_id.r#type.manufacturer,
             register_ok.actr_id.r#type.name,
             subscribers.len()
@@ -598,7 +658,7 @@ async fn handle_register_request(
         // 为每个订阅者构造并发送通知
         for subscriber_id in subscribers {
             let subscriber_client_id =
-                match resolve_client_id_by_actor_id(subscriber_id, server).await {
+                match resolve_client_id_by_actor_id(&subscriber_id, server).await {
                     Ok(id) => id,
                     Err(e) => {
                         warn!(
@@ -610,7 +670,7 @@ async fn handle_register_request(
                 };
 
             let flow = signaling_envelope::Flow::ServerToActr(SignalingToActr {
-                target: subscriber_id.clone(),
+                target: subscriber_id,
                 payload: Some(signaling_to_actr::Payload::ActrUpEvent(
                     actr_up_event.clone(),
                 )),
@@ -622,8 +682,8 @@ async fn handle_register_request(
                 send_envelope_to_client(&subscriber_client_id, event_envelope, server).await
             {
                 warn!(
-                    "⚠️  发送 ActrUpEvent 到订阅者 {} 失败: {}",
-                    subscriber_id.serial_number, e
+                    "⚠️  发送 ActrUpEvent 到订阅者失败: {}",
+                    e
                 );
             }
         }
@@ -885,6 +945,55 @@ async fn handle_actr_relay(
     );
 
     tracing::debug!(?relay, "handle_actr_relay");
+
+    // ACL check: can source relay to target?
+    use actrix_common::tenant::acl::ActorAcl;
+    let source_realm = source.realm.realm_id.to_string();
+    let target_realm = target.realm.realm_id.to_string();
+    
+    // Cross-realm relay is denied by default for security
+    if source_realm != target_realm {
+        warn!(
+            "⚠️  ACL denied cross-realm relay: realm {} -> realm {}",
+            source_realm, target_realm
+        );
+        send_error_response(
+            client_id,
+            &source,
+            403,
+            "Cross-realm relay is not allowed",
+            server,
+            Some(request_envelope_id),
+        )
+        .await?;
+        return Ok(());
+    }
+    
+    // Same realm: check ACL rules (always enforced)
+    let can_relay = ActorAcl::can_discover(
+        &source_realm,
+        &source.r#type.name,
+        &target.r#type.name,
+    )
+    .await
+    .unwrap_or(false);
+
+    if !can_relay {
+        warn!(
+            "⚠️  ACL denied relay: {} -> {}",
+            source.serial_number, target.serial_number
+        );
+        send_error_response(
+            client_id,
+            &source,
+            403,
+            "ACL policy denies relay to target actor",
+            server,
+            Some(request_envelope_id),
+        )
+        .await?;
+        return Ok(());
+    }
 
     // 验证 credential
     if let Err(e) = AIdCredentialValidator::check(&relay.credential, source.realm.realm_id).await {
@@ -1238,13 +1347,57 @@ async fn handle_discovery_request(
     // 从 ServiceRegistry 查询所有服务
     let registry = server.service_registry.read().await;
     let services = registry.discover_all(req.manufacturer.as_deref());
+    let total_count = services.len(); // Save count before moving
+
+    // Apply ACL filtering (if ACL is enabled)
+    use actrix_common::tenant::acl::ActorAcl;
+    let source_realm = source.realm.realm_id.to_string();
+    let source_type = &source.r#type.name;
+
+    let mut acl_filtered_services = Vec::new();
+    
+    // ACL always enabled: filter services based on ACL rules
+    for service in services {
+        let target_realm = service.actor_id.realm.realm_id.to_string();
+        let target_type = &service.actor_id.r#type.name;
+
+        // Only check ACL if in same realm
+        if source_realm == target_realm {
+            match ActorAcl::can_discover(&source_realm, source_type, target_type).await {
+                Ok(true) => acl_filtered_services.push(service),
+                Ok(false) => {
+                    debug!(
+                        "ACL denied discovery: {} cannot discover {}",
+                        source.serial_number, service.actor_id.serial_number
+                    );
+                }
+                Err(e) => {
+                    warn!(
+                        "ACL check failed for {} -> {}: {}",
+                        source.serial_number, service.actor_id.serial_number, e
+                    );
+                }
+            }
+        } else {
+            // Cross-realm discovery denied
+            debug!(
+                "Cross-realm discovery denied: {} -> {}",
+                source_realm, target_realm
+            );
+        }
+    }
+    info!(
+        "ACL filtering: {} -> {} services",
+        total_count,
+        acl_filtered_services.len()
+    );
 
     // 按 ActrType 聚合服务（使用 HashMap 去重）
     use std::collections::HashMap;
     let mut type_map: HashMap<String, actr_protocol::discovery_response::TypeEntry> =
         HashMap::new();
 
-    for service in services {
+    for service in acl_filtered_services {
         let type_key = format!(
             "{}/{}",
             service.actor_id.r#type.manufacturer, service.actor_id.r#type.name
@@ -1317,6 +1470,8 @@ async fn handle_route_candidates_request(
     let candidates = registry.find_by_actr_type(&req.target_type);
     drop(registry);
 
+    let total_candidates = candidates.len();
+
     if candidates.is_empty() {
         info!(
             "⚠️  未找到 {}/{} 类型的服务实例",
@@ -1325,11 +1480,52 @@ async fn handle_route_candidates_request(
     } else {
         info!(
             "📋 找到 {} 个 {}/{} 类型的候选实例",
-            candidates.len(),
+            total_candidates,
             req.target_type.manufacturer,
             req.target_type.name
         );
     }
+
+    // Apply ACL filtering
+    use actrix_common::tenant::acl::ActorAcl;
+    let source_realm = source.realm.realm_id.to_string();
+    let source_type = &source.r#type.name;
+    let target_type = &req.target_type.name;
+
+    let mut acl_filtered_candidates = Vec::new();
+    for candidate in candidates {
+        let target_realm = candidate.actor_id.realm.realm_id.to_string();
+
+        // Only check ACL if in same realm
+        if source_realm == target_realm {
+            match ActorAcl::can_discover(&source_realm, source_type, target_type).await {
+                Ok(true) => acl_filtered_candidates.push(candidate),
+                Ok(false) => {
+                    debug!(
+                        "ACL denied route candidate: {} cannot access {}",
+                        source.serial_number, candidate.actor_id.serial_number
+                    );
+                }
+                Err(e) => {
+                    warn!(
+                        "ACL check failed for {} -> {}: {}",
+                        source.serial_number, candidate.actor_id.serial_number, e
+                    );
+                }
+            }
+        } else {
+            // Cross-realm access denied
+            debug!(
+                "Cross-realm route candidate denied: {} -> {}",
+                source_realm, target_realm
+            );
+        }
+    }
+    info!(
+        "ACL filtering for route candidates: {} -> {} candidates",
+        total_candidates,
+        acl_filtered_candidates.len()
+    );
 
     // 使用 LoadBalancer 进行排序和过滤
     // 从请求中提取客户端位置（如果提供）
@@ -1354,7 +1550,7 @@ async fn handle_route_candidates_request(
     let compatibility_cache = Some(&*cache_guard);
 
     let ranked_actor_ids = LoadBalancer::rank_candidates(
-        candidates,
+        acl_filtered_candidates,
         req.criteria.as_ref(),
         Some(client_id),
         client_location,
