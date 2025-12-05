@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/*", "deploy"]
+members = ["crates/*"]
 # supervit 已重构为 gRPC 模式，可以启用
 resolver = "2"
 
