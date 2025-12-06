@@ -970,26 +970,26 @@ async fn handle_actr_relay(
     let source_type = format!("{}:{}", source.r#type.manufacturer, source.r#type.name);
     let target_type = format!("{}:{}", target.r#type.manufacturer, target.r#type.name);
 
-    let can_relay = ActorAcl::can_discover(&source_realm, &source_type, &target_type)
-        .await
-        .unwrap_or(false);
+    // let can_relay = ActorAcl::can_discover(&source_realm, &source_type, &target_type)
+    //     .await
+    //     .unwrap_or(false);
 
-    if !can_relay {
-        warn!(
-            "⚠️  ACL denied relay: {} -> {}",
-            source.serial_number, target.serial_number
-        );
-        send_error_response(
-            client_id,
-            &source,
-            403,
-            "ACL policy denies relay to target actor",
-            server,
-            Some(request_envelope_id),
-        )
-        .await?;
-        return Ok(());
-    }
+    // if !can_relay {
+    //     warn!(
+    //         "⚠️  ACL denied relay: {} -> {}",
+    //         source.serial_number, target.serial_number
+    //     );
+    //     send_error_response(
+    //         client_id,
+    //         &source,
+    //         403,
+    //         "ACL policy denies relay to target actor",
+    //         server,
+    //         Some(request_envelope_id),
+    //     )
+    //     .await?;
+    //     return Ok(());
+    // }
 
     // 验证 credential
     if let Err(e) = AIdCredentialValidator::check(&relay.credential, source.realm.realm_id).await {
@@ -1493,7 +1493,7 @@ async fn handle_route_candidates_request(
     let target_type = format!("{}:{}", req.target_type.manufacturer, req.target_type.name);
 
     let mut acl_filtered_candidates = Vec::new();
-    for candidate in candidates {
+    for candidate in candidates.iter() {
         let target_realm = candidate.actor_id.realm.realm_id.to_string();
 
         // Only check ACL if in same realm
@@ -1550,7 +1550,8 @@ async fn handle_route_candidates_request(
     let compatibility_cache = Some(&*cache_guard);
 
     let ranked_actor_ids = LoadBalancer::rank_candidates(
-        acl_filtered_candidates,
+        // acl_filtered_candidates,
+        candidates,
         req.criteria.as_ref(),
         Some(client_id),
         client_location,
