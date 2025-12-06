@@ -1523,7 +1523,7 @@ async fn handle_route_candidates_request(
     let target_type = format!("{}:{}", req.target_type.manufacturer, req.target_type.name);
 
     let mut acl_filtered_candidates = Vec::new();
-    for candidate in candidates.clone() {
+    for candidate in candidates {
         let target_realm = candidate.actor_id.realm.realm_id.to_string();
 
         // Only check ACL if in same realm
@@ -1580,7 +1580,7 @@ async fn handle_route_candidates_request(
     let compatibility_cache = Some(&*cache_guard);
 
     let ranked_actor_ids = LoadBalancer::rank_candidates(
-        candidates,
+        acl_filtered_candidates,
         req.criteria.as_ref(),
         Some(client_id),
         client_location,
