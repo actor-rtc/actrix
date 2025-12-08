@@ -92,7 +92,7 @@ message ServiceStatus {
 // ============================================================================
 
 message TenantInfo {
-  required string tenant_id = 1;            // Tenant identifier
+  required uint32 realm_id = 1;            // Realm identifier
   required string name = 2;                 // Tenant name
   required bool enabled = 3;                // Enabled status
   required int64 created_at = 4;            // Creation timestamp

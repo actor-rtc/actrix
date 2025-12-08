@@ -147,14 +147,14 @@ The communication protocol is defined in `proto/supervisor.proto` (SupervisorSer
 ### Services
 
 - **SupervisorService**: `RegisterNode`, `Report`, `HealthCheck`
-- **SupervisedService**: `UpdateConfig`, `GetConfig`, tenant CRUD (`CreateTenant`, `GetTenant`, `UpdateTenant`, `DeleteTenant`, `ListTenants`), `GetNodeInfo`, `Shutdown`
+- **SupervisedService**: `UpdateConfig`, `GetConfig`, realm CRUD (`CreateTenant`, `GetTenant`, `UpdateTenant`, `DeleteTenant`, `ListTenants`), `GetNodeInfo`, `Shutdown`
 
 ### Message Types
 
 - `RegisterNodeRequest/Response`: Node registration handshake
 - `ReportRequest` / `ReportResponse`: System metrics and service status reporting
 - `UpdateConfigRequest/Response`, `GetConfigRequest/Response`: Configuration management
-- `CreateTenantRequest/Response`, `GetTenantRequest/Response`, `UpdateTenantRequest/Response`, `DeleteTenantRequest/Response`, `ListTenantsRequest/Response`: Tenant CRUD
+- `CreateTenantRequest/Response`, `GetTenantRequest/Response`, `UpdateTenantRequest/Response`, `DeleteTenantRequest/Response`, `ListTenantsRequest/Response`: Realm CRUD
 - `GetNodeInfoRequest/Response`, `ShutdownRequest/Response`: Node control
 - `HealthCheckRequest/Response`: Health checks
 

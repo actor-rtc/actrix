@@ -85,7 +85,7 @@ struct Args {
     #[arg(short, long, value_parser = parse_action, default_value = "node_info")]
     action: String,
 
-    /// Subject (tenant_id for realm operations, type:key for config operations)
+    /// Subject (realm_id for realm operations, type:key for config operations)
     #[arg(short, long)]
     subject: Option<String>,
 

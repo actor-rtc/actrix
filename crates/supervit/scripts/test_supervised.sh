@@ -14,15 +14,15 @@
 #   describe      - Describe SupervisedService
 #   node_info     - Get node information
 #   list_tenants  - List all tenants/realms
-#   get_tenant    - Get tenant by ID (requires --tenant-id)
-#   create_tenant - Create a new tenant (requires --tenant-id)
+#   get_tenant    - Get realm by ID (requires --realm-id)
+#   create_tenant - Create a new realm (requires --realm-id)
 #   shutdown      - Shutdown the node
 #
 # Examples:
 #   ./scripts/test_supervised.sh list
 #   ./scripts/test_supervised.sh node_info
-#   ./scripts/test_supervised.sh get_tenant --tenant-id test-realm-01
-#   ./scripts/test_supervised.sh create_tenant --tenant-id new-realm
+#   ./scripts/test_supervised.sh get_tenant --realm-id test-realm-01
+#   ./scripts/test_supervised.sh create_tenant --realm-id new-realm
 
 set -e
 
@@ -112,12 +112,12 @@ generate_credential() {
 # Parse command line arguments
 parse_args() {
     ACTION=""
-    TENANT_ID=""
+    REALM_ID=""
     
     while [[ $# -gt 0 ]]; do
         case "$1" in
-            --tenant-id)
-                TENANT_ID="$2"
+            --realm-id)
+                REALM_ID="$2"
                 shift 2
                 ;;
             --server)
@@ -148,13 +148,13 @@ Actions:
   list          List available gRPC services (no auth required)
   describe      Describe SupervisedService methods (no auth required)
   node_info     Get node information
-  list_tenants  List all tenants
-  get_tenant    Get tenant by ID (requires --tenant-id)
-  create_tenant Create a new tenant (requires --tenant-id)
+  list_tenants  List all realms
+  get_tenant    Get realm by ID (requires --realm-id)
+  create_tenant Create a new realm (requires --realm-id)
   shutdown      Shutdown the node gracefully
 
 Options:
-  --tenant-id   Tenant ID for tenant operations
+  --realm-id    Realm ID for realm operations
   --server      gRPC server address (default: localhost:50055)
   --help, -h    Show this help message
 
@@ -175,11 +175,11 @@ Examples:
   # List all tenants
   ./scripts/test_supervised.sh list_tenants
 
-  # Get specific tenant
-  ./scripts/test_supervised.sh get_tenant --tenant-id my-realm
+  # Get specific realm
+  ./scripts/test_supervised.sh get_tenant --realm-id my-realm
 
-  # Create tenant
-  ./scripts/test_supervised.sh create_tenant --tenant-id new-realm
+  # Create realm
+  ./scripts/test_supervised.sh create_tenant --realm-id new-realm
 
 Prerequisites:
   1. Start the server: cargo run -p supervit --example supervisord_server
@@ -249,15 +249,15 @@ EOF
 
 # Action: Get tenant
 action_get_tenant() {
-    if [[ -z "$TENANT_ID" ]]; then
-        error "Tenant ID required. Use --tenant-id <id>"
+    if [[ -z "$REALM_ID" ]]; then
+        error "Realm ID required. Use --realm-id <id>"
         exit 1
     fi
     
-    info "Getting tenant: ${TENANT_ID}"
+    info "Getting realm: ${REALM_ID}"
     
     local cred
-    cred=$(generate_credential "get_realm" "${TENANT_ID}")
+    cred=$(generate_credential "get_realm" "${REALM_ID}")
     if [[ -z "$cred" ]]; then
         error "Failed to generate credential"
         exit 1
@@ -266,7 +266,7 @@ action_get_tenant() {
     local request
     request=$(cat << EOF
 {
-  "tenant_id": "${TENANT_ID}",
+  "realm_id": "${REALM_ID}",
   "credential": ${cred}
 }
 EOF
@@ -279,15 +279,15 @@ EOF
 
 # Action: Create tenant
 action_create_tenant() {
-    if [[ -z "$TENANT_ID" ]]; then
-        error "Tenant ID required. Use --tenant-id <id>"
+    if [[ -z "$REALM_ID" ]]; then
+        error "Realm ID required. Use --realm-id <id>"
         exit 1
     fi
     
-    info "Creating tenant: ${TENANT_ID}"
+    info "Creating realm: ${REALM_ID}"
     
     local cred
-    cred=$(generate_credential "create_realm" "${TENANT_ID}")
+    cred=$(generate_credential "create_realm" "${REALM_ID}")
     if [[ -z "$cred" ]]; then
         error "Failed to generate credential"
         exit 1
@@ -300,8 +300,8 @@ action_create_tenant() {
     local request
     request=$(cat << EOF
 {
-  "tenant_id": "${TENANT_ID}",
-  "name": "Test Realm ${TENANT_ID}",
+  "realm_id": "${REALM_ID}",
+  "name": "Test Realm ${REALM_ID}",
   "public_key": "${test_public_key}",
   "enabled": true,
   "key_id": "key-$(date +%s)",

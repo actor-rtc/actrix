@@ -34,7 +34,7 @@ pub mod aid;              // Actor Identity 管理
 pub mod error;            // 错误类型定义
 pub mod monitoring;       // 服务状态监控
 pub mod storage;          // 存储抽象
-pub mod tenant;           // 租户管理
+pub mod tenant;           // Realm 管理
 pub mod types;            // 通用类型定义
 pub mod config;           // 配置系统
 pub mod util;             // 工具函数
@@ -286,90 +286,92 @@ impl nonce_auth::StorageBackend for SqliteNonceStorage {
 **文件**: `crates/base/src/aid/mod.rs:1-11`
 
 ```rust
-pub mod claims;           // Token Claims 定义
+pub mod identity_claims;  // Identity Claims 定义
 pub mod credential;       // Credential 验证器
 pub mod key_cache;        // 密钥缓存
 
-pub use claims::Claims;
+pub use identity_claims::IdentityClaims;
 pub use credential::{AIdCredential, AIdCredentialValidator, AidError};
 pub use key_cache::KeyCache;
 ```
 
-#### 1.4.2 Claims - Token 声明
+#### 1.4.2 IdentityClaims - 身份声明
 
-**文件**: `crates/base/src/aid/claims.rs:10-40`
+**文件**: `crates/common/src/aid/identity_claims.rs:10-53`
 
 ```rust
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Claims {
-    pub actor_id: String,     // Actor 唯一标识
-    pub tenant_id: String,    // 租户 ID
-    pub exp: i64,             // 过期时间 (UNIX 时间戳)
-    pub iat: i64,             // 签发时间 (UNIX 时间戳)
+pub struct IdentityClaims {
+    /// Realm ID (安全域标识符)
+    pub realm_id: u32,
+
+    /// Actor ID 字符串表示
+    /// 格式: {manufacturer}:{name}@{serial_number_hex}:{realm_id}
+    /// 示例: "apple:user@fed02d3f000000:12345"
+    pub actor_id: String,
+
+    /// Token 过期时间 (Unix timestamp, seconds)
+    pub expr_time: u64,
 }
 
-impl Claims {
-    pub fn new(actor_id: String, tenant_id: String, ttl_seconds: i64) -> Self {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs() as i64;
-
+impl IdentityClaims {
+    /// 创建新的 IdentityClaims
+    pub fn new(realm_id: u32, actor_id: String, expr_time: u64) -> Self {
         Self {
+            realm_id,
             actor_id,
-            tenant_id,
-            iat: now,
-            exp: now + ttl_seconds,
+            expr_time,
         }
     }
 
+    /// 从 actr_protocol::ActrId 创建 IdentityClaims
+    pub fn from_actr_id(actr_id: &actr_protocol::ActrId, expr_time: u64) -> Self {
+        use actr_protocol::ActrIdExt;
+        Self {
+            realm_id: actr_id.realm.realm_id,
+            actor_id: actr_id.to_string_repr(),
+            expr_time,
+        }
+    }
+
+    /// 检查 Token 是否过期
     pub fn is_expired(&self) -> bool {
+        use std::time::{SystemTime, UNIX_EPOCH};
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
-            .as_secs() as i64;
-
-        self.exp < now
+            .as_secs();
+        now > self.expr_time
     }
 }
 ```
 
 #### 1.4.3 AIdCredential - 加密凭证
 
-**文件**: `crates/base/src/aid/credential/aid_credential.rs:15-55`
+**文件**: `crates/common/src/aid/credential/`
 
 使用 ECIES 加密的 Actor Identity Credential:
 
 ```rust
 pub struct AIdCredential {
-    encrypted_data: Vec<u8>,    // ECIES 加密的数据
-    key_id: u32,                // 加密密钥 ID
+    encrypted_token: Bytes,     // ECIES 加密的 IdentityClaims
+    token_key_id: u32,          // 加密密钥 ID
 }
 
-impl AIdCredential {
-    /// 创建新凭证 (使用 ECIES 加密)
-    pub fn new(claims: &Claims, public_key: &PublicKey)
-        -> Result<Self, AidError> {
-        let claims_json = serde_json::to_string(claims)?;
-        let encrypted_data = ecies::encrypt(
-            public_key.serialize().as_ref(),
-            claims_json.as_bytes(),
-        )?;
-
-        Ok(Self { encrypted_data, key_id: public_key.key_id })
-    }
-
-    /// 解密凭证 (使用 ECIES 私钥)
-    pub fn decrypt(&self, secret_key: &SecretKey)
-        -> Result<Claims, AidError> {
-        let decrypted = ecies::decrypt(
-            secret_key.serialize().as_ref(),
-            &self.encrypted_data,
-        )?;
-
-        let claims: Claims = serde_json::from_slice(&decrypted)?;
-        Ok(claims)
-    }
+// 加密 IdentityClaims 为 credential
+fn encrypt_claims(
+    claims: &IdentityClaims,
+    public_key: &PublicKey,
+) -> Result<Vec<u8>, AidError> {
+    // 序列化 claims
+    let claims_bytes = serde_json::to_vec(claims)?;
+    
+    // 将 PublicKey 转换为字节
+    let public_key_bytes = public_key.serialize();
+    
+    // 使用 ECIES 加密
+    encrypt(&public_key_bytes, &claims_bytes)
+        .map_err(|e| AidError::GenerationFailed(format!("Encryption error: {e}")))
 }
 ```
 
@@ -459,21 +461,21 @@ pub enum BaseError {
 pub type Result<T> = std::result::Result<T, BaseError>;
 ```
 
-### 1.6 租户管理 (tenant)
+### 1.6 Realm 管理 (tenant)
 
 **文件**: `crates/base/src/tenant/mod.rs:15-100`
 
 ```rust
 pub struct Tenant {
-    pub id: TenantId,         // 租户唯一 ID
-    pub name: String,         // 租户名称
+    pub id: RealmId,         // Realm 唯一 ID
+    pub name: String,         // Realm 名称
     pub created_at: i64,      // 创建时间
     pub status: TenantStatus, // 状态: Active/Suspended/Deleted
 }
 
 pub struct ActorAcl {
     pub actor_id: ActrId,     // Actor ID
-    pub tenant_id: TenantId,  // 所属租户
+    pub realm_id: RealmId,  // 所属 Realm
     pub permissions: Vec<Permission>, // 权限列表
 }
 
@@ -1486,6 +1488,7 @@ impl AuthHandler for Authenticator {
         }
 
         // 2️⃣ 缓存未命中，解析 Claims 获取 PSK
+        // 注意：这里使用的是 actr_protocol::turn::Claims（来自外部依赖）
         let claims: Claims = serde_json::from_str(username).map_err(|e| {
             warn!("无法解析 Claims: username={}, error={}", username, e);
             Error::Other(format!("Failed to parse claims: {e}"))
@@ -1495,8 +1498,8 @@ impl AuthHandler for Authenticator {
         let token: Token = match claims.get_token() {
             Ok(token) => token,
             Err(e) => {
-                error!("无法解密 token: tid={}, key_id={}, error={}",
-                       claims.tid, claims.key_id, e);
+                error!("无法解密 token: realm_id={}, key_id={}, error={}",
+                       claims.realm_id, claims.key_id, e);
                 return Err(Error::Other(format!("Failed to decrypt token: {e}")));
             }
         };
@@ -1525,8 +1528,8 @@ impl AuthHandler for Authenticator {
 
 **认证流程**（符合 RFC 5766 + 安全加固）:
 1. 检查 LRU 缓存（基于 username:realm）
-2. 解析 username 中的 JSON Claims（包含 tid、key_id、加密 token）
-3. 从租户数据库获取私钥（基于 tid + key_id）
+2. 解析 username 中的 JSON Claims（来自 actr_protocol::turn::Claims，包含 realm_id、key_id、加密 token）
+3. 从 Realm 数据库获取私钥（基于 realm_id + key_id）
 4. 使用 ECIES 解密 token 获取 PSK（加密保护）
 5. 计算 MD5(username:realm:psk) 作为认证密钥
 6. 缓存结果以提升性能（+40%）
@@ -1616,7 +1619,7 @@ pub struct SignalingServer {
 
 pub struct ClientConnection {
     pub actor_id: ActrId,
-    pub tenant_id: TenantId,
+    pub realm_id: RealmId,  // Realm ID
     pub tx: mpsc::UnboundedSender<Message>,
     pub connected_at: SystemTime,
 }
@@ -1646,7 +1649,7 @@ impl SignalingServer {
         &self,
         ws: WebSocket,
         actor_id: ActrId,
-        tenant_id: TenantId,
+        realm_id: RealmId,
     ) {
         let (ws_tx, mut ws_rx) = ws.split();
         let (client_tx, mut client_rx) = mpsc::unbounded_channel();
@@ -1656,13 +1659,13 @@ impl SignalingServer {
             let mut clients = self.clients.write().await;
             clients.insert(actor_id.clone(), ClientConnection {
                 actor_id: actor_id.clone(),
-                tenant_id: tenant_id.clone(),
+                realm_id: realm_id.clone(),
                 tx: client_tx,
                 connected_at: SystemTime::now(),
             });
         }
 
-        info!("Client {} (tenant: {}) connected", actor_id, tenant_id);
+        info!("Client {} (realm: {}) connected", actor_id, realm_id);
 
         // 发送任务
         let send_task = tokio::spawn(async move {
@@ -1979,7 +1982,7 @@ loop {
 
 **职责**:
 - 处理 `RegisterRequest` 并生成 `RegisterResponse`
-- 从 KS 获取公钥加密 Claims 生成 AIdCredential
+- 从 KS 获取公钥加密 IdentityClaims 生成 AIdCredential
 - 生成 256-bit PSK
 - 后台自动刷新密钥（每 10 分钟检查，提前 10 分钟刷新）
 
@@ -2205,12 +2208,12 @@ cargo build --release --features opentelemetry
 
 ### TURN (中继服务器)
 - ✅ MD5 HMAC 认证
-- ✅ 基于 Claims 的授权
+- ✅ 基于 IdentityClaims 的授权
 - ⚠️ 当前使用 actor_id 作为 PSK
   - TODO: 从安全存储获取 PSK
 
 ### Signaling (信令服务)
-- ✅ 租户隔离 (tenant_id)
+- ✅ Realm 隔离 (realm_id)
 - ✅ 消息路由验证
 - ✅ WebSocket 安全连接
 

@@ -14,7 +14,7 @@
 - 验证过期时间的合理性
 
 ### 2. `test_token_validation_with_wrong_tenant_fails`
-验证安全性：使用错误的 tenant_id 验证 Token 应该失败
+验证安全性：使用错误的 realm_id 验证 Token 应该失败
 
 ### 3. `test_multiple_key_rotations`
 验证密钥轮换：

@@ -194,7 +194,7 @@ impl CredentialPayload for CreateTenantRequest {
     }
 
     fn auth_payload(&self, node_id: &str) -> String {
-        format!("create_realm:{node_id}:{}", self.tenant_id)
+        format!("create_realm:{node_id}:{}", self.realm_id)
     }
 }
 
@@ -204,7 +204,7 @@ impl CredentialPayload for GetTenantRequest {
     }
 
     fn auth_payload(&self, node_id: &str) -> String {
-        format!("get_realm:{node_id}:{}", self.tenant_id)
+        format!("get_realm:{node_id}:{}", self.realm_id)
     }
 }
 
@@ -214,7 +214,7 @@ impl CredentialPayload for UpdateTenantRequest {
     }
 
     fn auth_payload(&self, node_id: &str) -> String {
-        format!("update_realm:{node_id}:{}", self.tenant_id)
+        format!("update_realm:{node_id}:{}", self.realm_id)
     }
 }
 
@@ -224,7 +224,7 @@ impl CredentialPayload for DeleteTenantRequest {
     }
 
     fn auth_payload(&self, node_id: &str) -> String {
-        format!("delete_realm:{node_id}:{}", self.tenant_id)
+        format!("delete_realm:{node_id}:{}", self.realm_id)
     }
 }
 

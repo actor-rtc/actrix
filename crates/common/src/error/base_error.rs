@@ -15,7 +15,7 @@ pub enum BaseError {
     #[error("AId error: {0}")]
     Aid(#[from] crate::aid::credential::AidError),
 
-    /// 租户管理错误
+    /// Realm 管理错误
     #[error("Tenant error: {0}")]
     Tenant(#[from] crate::tenant::TenantError),
 

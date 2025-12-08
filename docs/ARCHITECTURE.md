@@ -417,10 +417,10 @@ impl Database {
 **数据库表**:
 
 ```sql
--- 租户表
+-- Realm 表
 CREATE TABLE tenant (
     rowid INTEGER PRIMARY KEY,
-    tenant_id TEXT NOT NULL UNIQUE,
+    realm_id INTEGER NOT NULL UNIQUE,
     key_id TEXT NOT NULL,
     secret_key BLOB NOT NULL,
     name TEXT NOT NULL,
@@ -433,7 +433,7 @@ CREATE TABLE tenant (
 -- 访问控制表
 CREATE TABLE actoracl (
     rowid INTEGER PRIMARY KEY,
-    tenant_id TEXT NOT NULL,
+    realm_id INTEGER NOT NULL,
     from_type TEXT NOT NULL,
     to_type TEXT NOT NULL,
     access INTEGER NOT NULL

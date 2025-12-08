@@ -1,6 +1,6 @@
-//! 租户错误类型定义
+//! Realm 错误类型定义
 //!
-//! 定义了租户管理相关的错误类型
+//! 定义了 Realm 管理相关的错误类型
 
 use thiserror::Error;
 
@@ -12,10 +12,10 @@ pub enum TenantError {
     #[error("Validation error: {0}")]
     ValidationError(String),
 
-    #[error("Tenant not found")]
+    #[error("Realm not found")]
     NotFound,
 
-    #[error("Tenant already exists")]
+    #[error("Realm already exists")]
     AlreadyExists,
 
     #[error("Key expired")]

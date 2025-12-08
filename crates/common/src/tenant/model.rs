@@ -1,48 +1,35 @@
-//! 租户核心数据结构
+//! Realm 核心数据结构
 //!
-//! 定义租户实体的核心数据结构和基础方法
+//! 定义 Realm 实体的核心数据结构和基础方法
 
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 
-/// 租户结构体
+/// Realm 是用于分离不同应用程序资源的虚拟概念。
 ///
-/// 租户是用于分离不同应用程序资源的虚拟概念。
-///
-/// ## 字段说明
-/// - `name`: 租户名称，在一个宇宙中是唯一的
-/// - `key_id`: 租户密钥 ID
-/// - `app_id`: 应用 ID
-/// - `secret_key`: 认证私钥，用于租户级别的 Token 认证等
-/// - `public_key`: 认证公钥，用于租户级别的 Token 认证等，用于加密 credential
-///
-/// 统一租户表结构
-///
-/// 合并了 TenantForAuthority、TenantForSignaling 和 TenantForTurn 的所有字段
 #[derive(Debug, Clone, Serialize, Deserialize, Default, FromRow)]
-pub struct Tenant {
-    pub rowid: Option<i64>,
+pub struct Realm {
+    pub rowid: Option<u32>,
 
     // 基础字段 - 所有服务都需要
-    pub tenant_id: String,   // 租户ID（应用ID）
-    pub key_id: String,      // 密钥ID
-    pub secret_key: Vec<u8>, // 私钥
+    pub realm_id: u32,
+    pub key_id: String,
+    pub secret_key: Vec<u8>,
 
     // 可选字段 - 部分服务需要
-    pub name: String,            // 应用名称 (Authority 服务需要)
-    pub public_key: Vec<u8>,     // 公钥 (Authority 服务需要)
-    pub expires_at: Option<i64>, // 过期时间戳
+    pub name: String,        // Authority 服务需要
+    pub public_key: Vec<u8>, // Authority 服务需要
+    pub expires_at: Option<i64>,
 
     // 元数据字段
-    pub created_at: Option<i64>, // 创建时间
-    pub updated_at: Option<i64>, // 更新时间
+    pub created_at: Option<i64>,
+    pub updated_at: Option<i64>,
 }
 
-impl Tenant {
-    /// 创建新的统一租户实例
+impl Realm {
     pub fn new(
-        tenant_id: String,
+        realm_id: u32,
         key_id: String,
         public_key: Vec<u8>,
         secret_key: Vec<u8>,
@@ -51,7 +38,7 @@ impl Tenant {
         let now = Utc::now().timestamp();
         Self {
             rowid: None,
-            tenant_id,
+            realm_id,
             key_id,
             secret_key,
             name,
@@ -62,7 +49,6 @@ impl Tenant {
         }
     }
 
-    // Getter methods for accessing private fields
     pub fn name(&self) -> &str {
         &self.name
     }
@@ -87,11 +73,6 @@ impl Tenant {
     pub fn set_secret_key(&mut self, secret_key: Vec<u8>) {
         self.secret_key = secret_key;
     }
-
-    // Add tenant_id field for compatibility
-    pub fn tenant_id(&self) -> String {
-        self.tenant_id.clone()
-    }
 }
 
 #[cfg(test)]
@@ -100,15 +81,15 @@ mod tests {
 
     #[test]
     fn test_tenant_creation() {
-        let tenant = Tenant::new(
-            "test_tenant".to_string(),
+        let tenant = Realm::new(
+            12345,
             "test_key_id".to_string(),
             b"test_public".to_vec(),
             b"test_secret".to_vec(),
             "test_name".to_string(),
         );
 
-        assert_eq!(tenant.tenant_id, "test_tenant");
+        assert_eq!(tenant.realm_id, 12345u32);
         assert_eq!(tenant.key_id, "test_key_id");
         assert_eq!(tenant.secret_key, b"test_secret".to_vec());
         assert_eq!(tenant.public_key, b"test_public".to_vec());
@@ -119,8 +100,8 @@ mod tests {
 
     #[test]
     fn test_authority_tenant_creation() {
-        let tenant = Tenant::new(
-            "auth_tenant".to_string(),
+        let tenant = Realm::new(
+            54321,
             "auth_key_id".to_string(),
             b"auth_public".to_vec(),
             b"auth_secret".to_vec(),

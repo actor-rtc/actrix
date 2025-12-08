@@ -62,7 +62,7 @@ message GetConfigResponse {
 // ------------ CreateTenant ------------
 
 message CreateTenantRequest {
-  required string tenant_id = 1;            // Tenant identifier
+  required uint32 realm_id = 1;            // Realm identifier
   required string name = 2;                 // Tenant name
   required bytes public_key = 3;            // Public key (authentication)
   optional bytes secret_key = 4;            // Secret key (optional, some scenarios only need public key)
@@ -82,7 +82,7 @@ message CreateTenantResponse {
 // ------------ GetTenant ------------
 
 message GetTenantRequest {
-  required string tenant_id = 1;            // Tenant identifier
+  required uint32 realm_id = 1;            // Realm identifier
   required NonceCredential credential = 2;  // Authentication credential
 }
 
@@ -95,7 +95,7 @@ message GetTenantResponse {
 // ------------ UpdateTenant ------------
 
 message UpdateTenantRequest {
-  required string tenant_id = 1;            // Tenant identifier
+  required uint32 realm_id = 1;            // Realm identifier
   optional string name = 2;                 // New name (optional update)
   optional bool enabled = 3;                // New enabled status (optional update)
   required NonceCredential credential = 4;  // Authentication credential
@@ -110,7 +110,7 @@ message UpdateTenantResponse {
 // ------------ DeleteTenant ------------
 
 message DeleteTenantRequest {
-  required string tenant_id = 1;            // Tenant identifier
+  required uint32 realm_id = 1;            // Realm identifier
   required NonceCredential credential = 2;  // Authentication credential
 }
 

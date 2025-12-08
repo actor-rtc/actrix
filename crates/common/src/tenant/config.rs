@@ -1,16 +1,16 @@
 //! # Config 模块
 //!
-//! 提供租户配置和访问控制列表管理功能。
+//! 提供 Realm 配置和访问控制列表管理功能。
 //!
 //! ## 主要组件
 //!
-//! - `TenantConfig`: 租户配置管理，支持键值对配置
+//! - `TenantConfig`: Realm 配置管理，支持键值对配置
 //! - `ActorAcl`: Actor 访问控制列表，管理不同类型 Actor 之间的访问权限
 
 //! ## 设计特点
 //!
 //! - 使用 sqlx 进行数据库操作
-//! - 支持租户级别的配置隔离
+//! - 支持 Realm 级别的配置隔离
 //! - 提供灵活的访问控制机制
 
 use serde::{Deserialize, Serialize};
@@ -19,70 +19,63 @@ use sqlx::FromRow;
 use crate::storage::db::get_database;
 use crate::tenant::TenantError;
 
-/// 租户配置结构体
-///
-/// 用于存储租户级别的键值对配置信息
+/// 用于存储 Realm 级别的键值对配置信息
 #[derive(Debug, Clone, Serialize, Deserialize, Default, FromRow)]
 pub struct TenantConfig {
-    pub(crate) rowid: Option<i64>,
-    pub(crate) tenant_id: i64,
+    pub(crate) rowid: Option<u32>,
+    pub(crate) realm_id: u32, // 存储 tenant.rowid
     pub(crate) key: String,
     pub(crate) value: String,
 }
 
 impl TenantConfig {
-    /// 创建新的租户配置
-    pub fn new(tenant_id: i64, key: String, value: String) -> Self {
+    pub fn new(realm_id: u32, key: String, value: String) -> Self {
         Self {
             rowid: None,
-            tenant_id,
+            realm_id,
             key,
             value,
         }
     }
 
-    /// 保存配置到数据库
-    pub async fn save(&mut self) -> Result<i64, TenantError> {
+    pub async fn save(&mut self) -> Result<u32, TenantError> {
         let db = get_database();
         let pool = db.get_pool();
 
         if self.rowid.is_none() {
             // 插入新记录
             let result =
-                sqlx::query("INSERT INTO tenantconfig (tenant_id, key, value) VALUES (?, ?, ?)")
-                    .bind(self.tenant_id)
+                sqlx::query("INSERT INTO tenantconfig (realm_id, key, value) VALUES (?, ?, ?)")
+                    .bind(self.realm_id as i64)
                     .bind(&self.key)
                     .bind(&self.value)
                     .execute(pool)
                     .await?;
 
-            let new_rowid = result.last_insert_rowid();
+            let new_rowid = result.last_insert_rowid().try_into().unwrap();
             self.rowid = Some(new_rowid);
             Ok(new_rowid)
         } else {
             // 更新现有记录
-            sqlx::query(
-                "UPDATE tenantconfig SET tenant_id = ?, key = ?, value = ? WHERE rowid = ?",
-            )
-            .bind(self.tenant_id)
-            .bind(&self.key)
-            .bind(&self.value)
-            .bind(self.rowid)
-            .execute(pool)
-            .await?;
+            sqlx::query("UPDATE tenantconfig SET realm_id = ?, key = ?, value = ? WHERE rowid = ?")
+                .bind(self.realm_id as i64)
+                .bind(&self.key)
+                .bind(&self.value)
+                .bind(self.rowid)
+                .execute(pool)
+                .await?;
 
             Ok(self.rowid.unwrap())
         }
     }
 
-    /// 根据 ID 删除配置 (仅测试)
     #[cfg(test)]
-    pub(crate) async fn delete_by_id(id: i64) -> Result<u64, TenantError> {
+    pub(crate) async fn delete_by_id(id: u32) -> Result<u64, TenantError> {
         let db = get_database();
         let pool = db.get_pool();
 
         let result = sqlx::query("DELETE FROM tenantconfig WHERE rowid = ?")
-            .bind(id)
+            .bind(id as i64)
             .execute(pool)
             .await?;
 
@@ -94,14 +87,13 @@ impl TenantConfig {
         }
     }
 
-    /// 根据 ID 获取配置 (仅测试)
     #[cfg(test)]
-    pub(crate) async fn get(id: i64) -> Result<Option<Self>, TenantError> {
+    pub(crate) async fn get(id: u32) -> Result<Option<Self>, TenantError> {
         let db = get_database();
         let pool = db.get_pool();
 
         let result = sqlx::query_as::<_, TenantConfig>(
-            "SELECT rowid, tenant_id, key, value FROM tenantconfig WHERE rowid = ?",
+            "SELECT rowid, realm_id, key, value FROM tenantconfig WHERE rowid = ?",
         )
         .bind(id)
         .fetch_optional(pool)
@@ -110,42 +102,46 @@ impl TenantConfig {
         Ok(result)
     }
 
-    /// 获取指定租户的所有配置
-    pub async fn get_by_tenant(tenant_id: i64) -> Result<Vec<Self>, TenantError> {
+    pub async fn get_by_tenant(realm_id: u32) -> Result<Vec<Self>, TenantError> {
         let db = get_database();
         let pool = db.get_pool();
 
-        let configs = sqlx::query_as::<_, TenantConfig>(
-            "SELECT rowid, tenant_id, key, value FROM tenantconfig WHERE tenant_id = ?",
-        )
-        .bind(tenant_id)
-        .fetch_all(pool)
-        .await?;
+        let realm_id_i64 = realm_id as i64;
+        let rows =
+            sqlx::query("SELECT rowid, realm_id, key, value FROM tenantconfig WHERE realm_id = ?")
+                .bind(realm_id_i64)
+                .fetch_all(pool)
+                .await?;
 
+        let mut configs = Vec::new();
+        for row in rows {
+            configs.push(TenantConfig::from_row(&row)?);
+        }
         Ok(configs)
     }
 
-    /// 根据租户 ID 和配置键获取配置
+    /// 注意：这里的 realm_id 是 tenant.rowid
     pub async fn get_by_tenant_and_key(
-        tenant_id: &str,
+        realm_id: u32,
         key: &str,
     ) -> Result<Option<Self>, TenantError> {
-        let tenant_id_i64: i64 = tenant_id
-            .parse()
-            .map_err(|e: std::num::ParseIntError| TenantError::ParseError(e.to_string()))?;
-
         let db = get_database();
         let pool = db.get_pool();
 
-        let result = sqlx::query_as::<_, TenantConfig>(
-            "SELECT rowid, tenant_id, key, value FROM tenantconfig WHERE tenant_id = ? AND key = ?",
+        let realm_id_i64 = realm_id as i64;
+        let result = sqlx::query(
+            "SELECT rowid, realm_id, key, value FROM tenantconfig WHERE realm_id = ? AND key = ?",
         )
-        .bind(tenant_id_i64)
+        .bind(realm_id_i64)
         .bind(key)
         .fetch_optional(pool)
         .await?;
 
-        Ok(result)
+        if let Some(row) = result {
+            Ok(Some(TenantConfig::from_row(&row)?))
+        } else {
+            Ok(None)
+        }
     }
 
     pub fn key(&self) -> &str {
@@ -156,18 +152,17 @@ impl TenantConfig {
         &self.value
     }
 
-    /// 更新配置值
     pub fn set_value(&mut self, value: String) {
         self.value = value;
     }
 
-    /// 删除指定租户的所有配置
-    pub async fn delete_by_tenant(tenant_id: i64) -> Result<u64, TenantError> {
+    pub async fn delete_by_tenant(realm_id: u32) -> Result<u64, TenantError> {
         let db = get_database();
         let pool = db.get_pool();
 
-        let result = sqlx::query("DELETE FROM tenantconfig WHERE tenant_id = ?")
-            .bind(tenant_id)
+        let realm_id_i64 = realm_id as i64;
+        let result = sqlx::query("DELETE FROM tenantconfig WHERE realm_id = ?")
+            .bind(realm_id_i64)
             .execute(pool)
             .await?;
 
@@ -178,9 +173,8 @@ impl TenantConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{tenant::Tenant, util::test_utils::utils::setup_test_db};
+    use crate::{tenant::Realm, util::test_utils::utils::setup_test_db};
     use serial_test::serial;
-    use uuid::Uuid;
 
     #[tokio::test]
     #[serial]
@@ -188,9 +182,9 @@ mod tests {
         setup_test_db().await?;
 
         // Create a tenant first with unique name
-        let tenant_id = format!("test_tenant_for_config_{}", Uuid::new_v4());
-        let mut tenant = Tenant::new(
-            tenant_id,
+        let realm_id = rand::random::<u32>();
+        let mut tenant = Realm::new(
+            realm_id,
             "auth_key_for_config".to_string(),
             b"public_key".to_vec(),
             b"secret_key".to_vec(),
@@ -212,7 +206,7 @@ mod tests {
         let fetched_opt = TenantConfig::get(config_id).await?;
         assert!(fetched_opt.is_some());
         let fetched = fetched_opt.unwrap();
-        assert_eq!(fetched.tenant_id, tenant_row_id);
+        assert_eq!(fetched.realm_id, tenant_row_id);
         assert_eq!(fetched.key, "test_key");
         assert_eq!(fetched.value, "test_value");
 
@@ -233,7 +227,7 @@ mod tests {
 
         // Test get_by_tenant_and_key
         let config_by_key_opt =
-            TenantConfig::get_by_tenant_and_key(&tenant_row_id.to_string(), "test_key").await?;
+            TenantConfig::get_by_tenant_and_key(tenant_row_id, "test_key").await?;
         assert!(config_by_key_opt.is_some());
         let config_by_key = config_by_key_opt.unwrap();
         assert_eq!(config_by_key.value, "updated_value");

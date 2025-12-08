@@ -742,8 +742,8 @@ impl ServiceRegistry {
         to_actor: &ActrId,
     ) -> Result<bool, TenantError> {
         // Extract realm and actor types
-        let from_realm = from_actor.realm.realm_id.to_string();
-        let to_realm = to_actor.realm.realm_id.to_string();
+        let from_realm = from_actor.realm.realm_id;
+        let to_realm = to_actor.realm.realm_id;
 
         // Only check ACL if actors are in the same realm (tenant)
         if from_realm != to_realm {
@@ -758,7 +758,7 @@ impl ServiceRegistry {
         let from_type = &from_actor.r#type.name;
         let to_type = &to_actor.r#type.name;
 
-        ActorAcl::can_discover(&from_realm, from_type, to_type).await
+        ActorAcl::can_discover(from_realm, from_type, to_type).await
     }
 }
 

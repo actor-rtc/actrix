@@ -1,16 +1,16 @@
-//! 租户验证逻辑
+//! Realm 验证逻辑
 //!
-//! 包含租户相关的业务规则验证和检查
+//! 包含 Realm 相关的业务规则验证和检查
 
 use chrono::Utc;
 
-use super::model::Tenant;
+use super::model::Realm;
 
-/// 租户验证相关实现
-impl Tenant {
-    /// 检查租户是否存在
-    pub async fn exists(tenant_id: &str, key_id: &str) -> bool {
-        Self::get_by_tenant_key_id_service(tenant_id, key_id)
+/// Realm 验证相关实现
+impl Realm {
+    /// 检查 Realm 是否存在
+    pub async fn exists(realm_id: u32, key_id: &str) -> bool {
+        Self::get_by_tenant_key_id_service(realm_id, key_id)
             .await
             .unwrap_or(None)
             .is_some()
@@ -38,8 +38,8 @@ mod tests {
     #[test]
     fn test_expiration_check() {
         let past_time = Utc::now().timestamp() - 3600; // 1 hour ago
-        let mut tenant = Tenant::new(
-            "expired_tenant".to_string(),
+        let mut tenant = Realm::new(
+            99999,
             "expired_key_id".to_string(),
             b"expired_public".to_vec(),
             b"expired_secret".to_vec(),
@@ -57,8 +57,8 @@ mod tests {
 
     #[test]
     fn test_verify_secret_key() {
-        let tenant = Tenant::new(
-            "test".to_string(),
+        let tenant = Realm::new(
+            12345,
             "test".to_string(),
             b"correct_public".to_vec(),
             b"correct_secret".to_vec(),

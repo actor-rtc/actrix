@@ -1,27 +1,23 @@
-//! 租户数据库操作
+//! Realm 数据库操作
 //!
-//! 包含所有与租户数据持久化相关的CRUD操作
+//! 包含所有与 Realm 数据持久化相关的CRUD操作
 
 use chrono::Utc;
 
 use super::error::TenantError;
-use super::model::Tenant;
+use super::model::Realm;
 use crate::storage::db::get_database;
 
-/// 租户数据库操作实现
-impl Tenant {
-    /// 根据租户ID、密钥ID获取租户密钥
-    pub async fn get_keys(
-        key_id: String,
-        app_id: String,
-    ) -> Result<(Vec<u8>, Vec<u8>), TenantError> {
+/// Realm 数据库操作实现
+impl Realm {
+    pub async fn get_keys(key_id: String, app_id: u32) -> Result<(Vec<u8>, Vec<u8>), TenantError> {
         let db = get_database();
         let pool = db.get_pool();
 
         let result = sqlx::query_as::<_, (Vec<u8>, Vec<u8>)>(
-            "SELECT public_key, secret_key FROM tenant WHERE tenant_id = ? AND key_id = ?",
+            "SELECT public_key, secret_key FROM tenant WHERE realm_id = ? AND key_id = ?",
         )
-        .bind(&app_id)
+        .bind(app_id)
         .bind(&key_id)
         .fetch_optional(pool)
         .await?;
@@ -29,23 +25,23 @@ impl Tenant {
         result.ok_or(TenantError::NotFound)
     }
 
-    /// 保存租户到数据库
-    /// 如果是新租户则插入，如果已存在提示已存在
-    pub async fn save(&mut self) -> Result<i64, TenantError> {
+    /// 保存 Realm 到数据库
+    /// 如果是新 Realm 则插入，如果已存在提示已存在
+    pub async fn save(&mut self) -> Result<u32, TenantError> {
         let now = Utc::now().timestamp();
         let db = get_database();
         let pool = db.get_pool();
 
         if self.rowid.is_none() {
-            // 检查是否已存在相同的 tenant_id（应该全局唯一）
-            let exists: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM tenant WHERE tenant_id = ?")
-                .bind(&self.tenant_id)
+            // 检查是否已存在相同的 realm_id（应该全局唯一）
+            let exists: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM tenant WHERE realm_id = ?")
+                .bind(self.realm_id)
                 .fetch_one(pool)
                 .await?;
 
             if exists.0 > 0 {
                 return Err(TenantError::DatabaseError(
-                    "UNIQUE constraint failed: tenant.tenant_id".to_string(),
+                    "UNIQUE constraint failed: tenant.realm_id".to_string(),
                 ));
             }
 
@@ -54,10 +50,10 @@ impl Tenant {
 
             // 插入新记录
             let result = sqlx::query(
-                "INSERT INTO tenant (tenant_id, key_id, secret_key, name, public_key, expires_at, created_at, updated_at)
+                "INSERT INTO tenant (realm_id, key_id, secret_key, name, public_key, expires_at, created_at, updated_at)
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
             )
-            .bind(&self.tenant_id)
+            .bind(self.realm_id)
             .bind(&self.key_id)
             .bind(&self.secret_key)
             .bind(&self.name)
@@ -68,7 +64,7 @@ impl Tenant {
             .execute(pool)
             .await?;
 
-            let new_rowid = result.last_insert_rowid();
+            let new_rowid = result.last_insert_rowid().try_into().unwrap();
             self.rowid = Some(new_rowid);
             Ok(new_rowid)
         } else {
@@ -76,10 +72,10 @@ impl Tenant {
 
             // 更新现有记录
             sqlx::query(
-                "UPDATE tenant SET tenant_id = ?, key_id = ?, secret_key = ?, name = ?, public_key = ?, expires_at = ?, updated_at = ?
+                "UPDATE tenant SET realm_id = ?, key_id = ?, secret_key = ?, name = ?, public_key = ?, expires_at = ?, updated_at = ?
                  WHERE rowid = ?"
             )
-            .bind(&self.tenant_id)
+            .bind(self.realm_id)
             .bind(&self.key_id)
             .bind(&self.secret_key)
             .bind(&self.name)
@@ -96,19 +92,18 @@ impl Tenant {
         }
     }
 
-    /// 根据租户ID、密钥ID和服务类型获取租户
     pub async fn get_by_tenant_key_id_service(
-        tenant_id: &str,
+        realm_id: u32,
         key_id: &str,
-    ) -> Result<Option<Tenant>, TenantError> {
+    ) -> Result<Option<Realm>, TenantError> {
         let db = get_database();
         let pool = db.get_pool();
 
-        let result = sqlx::query_as::<_, Tenant>(
-            "SELECT rowid, tenant_id, key_id, secret_key, name, public_key, expires_at, created_at, updated_at
-             FROM tenant WHERE tenant_id = ? AND key_id = ?"
+        let result = sqlx::query_as::<_, Realm>(
+            "SELECT rowid, realm_id, key_id, secret_key, name, public_key, expires_at, created_at, updated_at
+             FROM tenant WHERE realm_id = ? AND key_id = ?"
         )
-        .bind(tenant_id)
+        .bind(realm_id)
         .bind(key_id)
         .fetch_optional(pool)
         .await?;
@@ -116,42 +111,39 @@ impl Tenant {
         Ok(result)
     }
 
-    /// 获取所有租户
-    pub async fn get_all() -> Result<Vec<Tenant>, TenantError> {
+    pub async fn get_all() -> Result<Vec<Realm>, TenantError> {
         let db = get_database();
         let pool = db.get_pool();
 
-        let tenants = sqlx::query_as::<_, Tenant>(
-            "SELECT rowid, tenant_id, key_id, secret_key, name, public_key, expires_at, created_at, updated_at
+        let tenants = sqlx::query_as::<_, Realm>(
+            "SELECT rowid, realm_id, key_id, secret_key, name, public_key, expires_at, created_at, updated_at
              FROM tenant"
         )
         .fetch_all(pool)
         .await?;
 
-        tracing::info!("获取所有租户: {:?}", tenants);
+        tracing::info!("获取所有 Realm: {:?}", tenants);
         Ok(tenants)
     }
 
-    /// 根据删除租户
-    pub async fn delete_instance(tenant_id: String) -> Result<u64, TenantError> {
+    pub async fn delete_instance(realm_id: u32) -> Result<u64, TenantError> {
         let db = get_database();
         let pool = db.get_pool();
 
-        let result = sqlx::query("DELETE FROM tenant WHERE tenant_id = ?")
-            .bind(tenant_id)
+        let result = sqlx::query("DELETE FROM tenant WHERE realm_id = ?")
+            .bind(realm_id)
             .execute(pool)
             .await?;
 
         Ok(result.rows_affected())
     }
 
-    /// 根据 ID 获取租户
-    pub async fn get(id: i64) -> Result<Option<Self>, TenantError> {
+    pub async fn get(id: u32) -> Result<Option<Self>, TenantError> {
         let db = get_database();
         let pool = db.get_pool();
 
-        let result = sqlx::query_as::<_, Tenant>(
-            "SELECT rowid, tenant_id, key_id, secret_key, name, public_key, expires_at, created_at, updated_at
+        let result = sqlx::query_as::<_, Realm>(
+            "SELECT rowid, realm_id, key_id, secret_key, name, public_key, expires_at, created_at, updated_at
              FROM tenant WHERE rowid = ?"
         )
         .bind(id)
@@ -161,13 +153,12 @@ impl Tenant {
         Ok(result)
     }
 
-    /// 根据名称获取租户
     pub async fn get_by_name(name: &str) -> Result<Option<Self>, TenantError> {
         let db = get_database();
         let pool = db.get_pool();
 
-        let result = sqlx::query_as::<_, Tenant>(
-            "SELECT rowid, tenant_id, key_id, secret_key, name, public_key, expires_at, created_at, updated_at
+        let result = sqlx::query_as::<_, Realm>(
+            "SELECT rowid, realm_id, key_id, secret_key, name, public_key, expires_at, created_at, updated_at
              FROM tenant WHERE name = ?"
         )
         .bind(name)
@@ -177,23 +168,21 @@ impl Tenant {
         Ok(result)
     }
 
-    /// 根据租户ID获取租户
-    pub async fn get_by_tenant_id(tenant_id: &str) -> Result<Option<Self>, TenantError> {
+    pub async fn get_by_realm_id(realm_id: u32) -> Result<Option<Self>, TenantError> {
         let db = get_database();
         let pool = db.get_pool();
 
-        let result = sqlx::query_as::<_, Tenant>(
-            "SELECT rowid, tenant_id, key_id, secret_key, name, public_key, expires_at, created_at, updated_at
-             FROM tenant WHERE tenant_id = ?",
+        let result = sqlx::query_as::<_, Realm>(
+            "SELECT rowid, realm_id, key_id, secret_key, name, public_key, expires_at, created_at, updated_at
+             FROM tenant WHERE realm_id = ?",
         )
-        .bind(tenant_id)
+        .bind(realm_id)
         .fetch_optional(pool)
         .await?;
 
         Ok(result)
     }
 
-    /// 获取所有租户列表
     pub async fn list() -> Result<Vec<Self>, TenantError> {
         Self::get_all().await
     }
@@ -204,23 +193,22 @@ mod tests {
     use super::*;
     use crate::util::test_utils::utils::setup_test_db;
     use serial_test::serial;
-    use uuid::Uuid;
 
     #[tokio::test]
     #[serial]
     async fn test_database_schema() -> anyhow::Result<()> {
         setup_test_db().await?;
 
-        // 创建一个租户来触发表创建，使用唯一名称
-        let tenant_id = format!("test_schema_{}", Uuid::new_v4());
-        let mut tenant = Tenant::new(
-            tenant_id,
+        // 创建一个 Realm 来触发表创建，使用唯一名称
+        let realm_id = rand::random::<u32>();
+        let mut tenant = Realm::new(
+            realm_id,
             "auth_key".to_string(),
             b"public_key".to_vec(),
             b"secret_key".to_vec(),
             "test_name".to_string(),
         );
-        let _tenant_id = tenant.save().await?;
+        let _rowid = tenant.save().await?;
 
         // 查询表结构
         let db = get_database();
@@ -248,10 +236,10 @@ mod tests {
     async fn test_duplicate_tenant_name() -> anyhow::Result<()> {
         setup_test_db().await?;
 
-        let tenant_name = format!("duplicate_test_{}", Uuid::new_v4());
+        let realm_id = rand::random::<u32>();
 
-        let mut tenant1 = Tenant::new(
-            tenant_name.clone(),
+        let mut tenant1 = Realm::new(
+            realm_id,
             "key_id1".to_string(),
             b"public_key".to_vec(),
             b"secret_key".to_vec(),
@@ -260,9 +248,9 @@ mod tests {
         let tenant1_id = tenant1.save().await?; // Save first tenant
         println!("Created first tenant with ID: {tenant1_id}");
 
-        // Try to create another tenant with the same name
-        let mut tenant2 = Tenant::new(
-            tenant_name.clone(),
+        // Try to create another Realm with the same realm_id
+        let mut tenant2 = Realm::new(
+            realm_id,
             "auth2".to_string(),
             b"public_key".to_vec(),
             b"secret_key".to_vec(),
