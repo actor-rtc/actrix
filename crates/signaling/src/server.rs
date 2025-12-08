@@ -556,7 +556,7 @@ async fn handle_register_request(
 
     // 持久化 ACL 规则到数据库
     if let Some(ref acl) = request.acl {
-        use actrix_common::tenant::acl::ActorAcl;
+        use actrix_common::realm::acl::ActorAcl;
 
         let realm_id = register_ok.actr_id.realm.realm_id;
         // 使用完整的 manufacturer:type 格式
@@ -944,7 +944,7 @@ async fn handle_actr_relay(
     tracing::debug!(?relay, "handle_actr_relay");
 
     // ACL check: can source relay to target?
-    use actrix_common::tenant::acl::ActorAcl;
+    use actrix_common::realm::acl::ActorAcl;
     let source_realm = source.realm.realm_id;
     let target_realm = target.realm.realm_id;
 
@@ -1372,7 +1372,7 @@ async fn handle_discovery_request(
     let total_count = services.len(); // Save count before moving
 
     // Apply ACL filtering (if ACL is enabled)
-    use actrix_common::tenant::acl::ActorAcl;
+    use actrix_common::realm::acl::ActorAcl;
     let source_realm = source.realm.realm_id;
     // 使用完整的 manufacturer:type 格式
     let source_type = format!("{}:{}", source.r#type.manufacturer, source.r#type.name);
@@ -1512,7 +1512,7 @@ async fn handle_route_candidates_request(
     }
 
     // Apply ACL filtering
-    use actrix_common::tenant::acl::ActorAcl;
+    use actrix_common::realm::acl::ActorAcl;
     let source_realm = source.realm.realm_id;
     // 使用完整的 manufacturer:type 格式
     let source_type = format!("{}:{}", source.r#type.manufacturer, source.r#type.name);

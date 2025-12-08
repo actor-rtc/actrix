@@ -46,9 +46,9 @@ impl Database {
 
     /// 初始化数据库表结构
     async fn initialize_schema(&self) -> Result<()> {
-        // 创建租户表
+        // 创建 Realm 表
         sqlx::query(
-            "CREATE TABLE IF NOT EXISTS tenant (
+            "CREATE TABLE IF NOT EXISTS realm (
                 rowid INTEGER PRIMARY KEY AUTOINCREMENT,
                 realm_id INTEGER NOT NULL,
                 key_id TEXT NOT NULL,
@@ -64,9 +64,9 @@ impl Database {
         .execute(&self.pool)
         .await?;
 
-        // 创建租户配置表
+        // 创建 Realm 配置表
         sqlx::query(
-            "CREATE TABLE IF NOT EXISTS tenantconfig (
+            "CREATE TABLE IF NOT EXISTS realmconfig (
                 rowid INTEGER PRIMARY KEY AUTOINCREMENT,
                 realm_id INTEGER NOT NULL,
                 key TEXT NOT NULL,
@@ -91,15 +91,15 @@ impl Database {
 
         // 创建索引
         sqlx::query(
-            "CREATE INDEX IF NOT EXISTS idx_tenant_realm_id_key_id
-             ON tenant(realm_id, key_id)",
+            "CREATE INDEX IF NOT EXISTS idx_realm_realm_id_key_id
+             ON realm(realm_id, key_id)",
         )
         .execute(&self.pool)
         .await?;
 
         sqlx::query(
-            "CREATE INDEX IF NOT EXISTS idx_tenantconfig_realm_id
-             ON tenantconfig(realm_id)",
+            "CREATE INDEX IF NOT EXISTS idx_realmconfig_realm_id
+             ON realmconfig(realm_id)",
         )
         .execute(&self.pool)
         .await?;

@@ -9,8 +9,8 @@
 //! - **后台写入**：不阻塞主逻辑，异步写入数据库
 
 use actr_protocol::{ActrId, ActrType};
-use actrix_common::TenantError;
-use actrix_common::tenant::acl::ActorAcl;
+use actrix_common::RealmError;
+use actrix_common::realm::acl::ActorAcl;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -690,7 +690,7 @@ impl ServiceRegistry {
         &self,
         requester_id: &ActrId,
         target_type: &ActrType,
-    ) -> Result<Vec<ServiceInfo>, TenantError> {
+    ) -> Result<Vec<ServiceInfo>, RealmError> {
         let all_services = self.find_by_actr_type(target_type);
         let total_count = all_services.len(); // Save count before moving
 
@@ -740,12 +740,12 @@ impl ServiceRegistry {
     async fn check_discovery_acl(
         from_actor: &ActrId,
         to_actor: &ActrId,
-    ) -> Result<bool, TenantError> {
+    ) -> Result<bool, RealmError> {
         // Extract realm and actor types
         let from_realm = from_actor.realm.realm_id;
         let to_realm = to_actor.realm.realm_id;
 
-        // Only check ACL if actors are in the same realm (tenant)
+        // Only check ACL if actors are in the same realm
         if from_realm != to_realm {
             debug!(
                 from_realm = %from_realm,

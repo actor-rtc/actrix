@@ -5,7 +5,7 @@ use anyhow::Result;
 
 use serde::{Deserialize, Serialize};
 
-use super::super::TenantError;
+use super::super::RealmError;
 use crate::storage::db::get_database;
 
 const ANONYMOUS_ACTOR_TYPE: &str = "ANONCLNT";
@@ -56,7 +56,7 @@ impl ActorAcl {
     /// # Returns
     ///
     /// Returns the rowid of the saved ACL rule
-    pub async fn save(&mut self) -> Result<i64, TenantError> {
+    pub async fn save(&mut self) -> Result<i64, RealmError> {
         let db = get_database();
         let pool = db.get_pool();
 
@@ -101,7 +101,7 @@ impl ActorAcl {
     /// # Returns
     ///
     /// Returns number of deleted rows (0 or 1)
-    pub async fn delete_by_id(id: i64) -> Result<u64, TenantError> {
+    pub async fn delete_by_id(id: i64) -> Result<u64, RealmError> {
         let db = get_database();
         let pool = db.get_pool();
 
@@ -114,7 +114,7 @@ impl ActorAcl {
         if changes > 0 {
             Ok(changes)
         } else {
-            Err(TenantError::NotFound)
+            Err(RealmError::NotFound)
         }
     }
 
@@ -127,7 +127,7 @@ impl ActorAcl {
     /// # Returns
     ///
     /// Returns the ACL rule if found, None otherwise
-    pub async fn get(id: i64) -> Result<Option<Self>, TenantError> {
+    pub async fn get(id: i64) -> Result<Option<Self>, RealmError> {
         let db = get_database();
         let pool = db.get_pool();
 
@@ -142,7 +142,7 @@ impl ActorAcl {
     }
 
     /// 获取指定 Realm 的所有访问控制规则
-    pub async fn get_by_tenant(realm_id: u32) -> Result<Vec<Self>, TenantError> {
+    pub async fn get_by_realm(realm_id: u32) -> Result<Vec<Self>, RealmError> {
         let db = get_database();
         let pool = db.get_pool();
 
@@ -161,7 +161,7 @@ impl ActorAcl {
         realm_id: u32,
         from_type: &str,
         to_type: &str,
-    ) -> Result<Option<Self>, TenantError> {
+    ) -> Result<Option<Self>, RealmError> {
         let db = get_database();
         let pool = db.get_pool();
 
@@ -200,7 +200,7 @@ impl ActorAcl {
         realm_id: u32,
         from_type: &str,
         to_type: &str,
-    ) -> Result<bool, TenantError> {
+    ) -> Result<bool, RealmError> {
         match Self::get_by_types(realm_id, from_type, to_type).await? {
             Some(acl) => {
                 tracing::debug!(
@@ -297,7 +297,7 @@ pub fn mock_actor_acl() -> Vec<ActorAcl> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tenant::Realm;
+    use crate::realm::Realm;
     use crate::util::test_utils::utils::setup_test_db;
     use serial_test::serial;
 
@@ -306,20 +306,20 @@ mod tests {
     async fn test_actor_acl_crud() -> anyhow::Result<()> {
         setup_test_db().await?;
 
-        // Create a tenant first with unique name
+        // Create a realm first with unique name
         let realm_id = rand::random::<u32>();
-        let mut tenant = Realm::new(
+        let mut realm = Realm::new(
             realm_id,
             "auth_key_for_acl".to_string(),
             b"public_key".to_vec(),
             b"secret_key".to_vec(),
             "test_name".to_string(),
         );
-        let tenant_row_id = tenant.save().await?;
+        let realm_row_id = realm.save().await?;
 
         // Test create
         let mut acl = ActorAcl::new(
-            tenant_row_id, // realm_id
+            realm_row_id, // realm_id
             "identified_client_user".to_string(),
             "identified_client_room".to_string(),
             true,
@@ -332,7 +332,7 @@ mod tests {
         let fetched_opt = ActorAcl::get(acl_id).await?;
         assert!(fetched_opt.is_some());
         let fetched = fetched_opt.unwrap();
-        assert_eq!(fetched.realm_id, tenant_row_id);
+        assert_eq!(fetched.realm_id, realm_row_id);
         assert_eq!(fetched.from_type, "identified_client_user");
         assert_eq!(fetched.to_type, "identified_client_room");
         assert!(fetched.access);
@@ -347,14 +347,14 @@ mod tests {
         let reloaded = reloaded_opt.unwrap();
         assert!(!reloaded.access);
 
-        // Test get_by_tenant
-        let acls_for_tenant = ActorAcl::get_by_tenant(tenant_row_id).await?;
-        assert_eq!(acls_for_tenant.len(), 1);
-        assert_eq!(acls_for_tenant[0].rowid, Some(acl_id));
+        // Test get_by_realm
+        let acls_for_realm = ActorAcl::get_by_realm(realm_row_id).await?;
+        assert_eq!(acls_for_realm.len(), 1);
+        assert_eq!(acls_for_realm[0].rowid, Some(acl_id));
 
         // Test get_by_types
         let acl_by_types_opt = ActorAcl::get_by_types(
-            tenant_row_id,
+            realm_row_id,
             "identified_client_user",
             "identified_client_room",
         )

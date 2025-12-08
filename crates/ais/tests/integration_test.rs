@@ -201,7 +201,7 @@ async fn test_token_validation_with_wrong_tenant_fails() {
         "Validation should fail with mismatched realm_id"
     );
 
-    println!("✅ Wrong tenant validation test passed!");
+    println!("✅ Wrong realm validation test passed!");
 }
 
 #[tokio::test]

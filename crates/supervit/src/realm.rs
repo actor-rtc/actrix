@@ -1,7 +1,7 @@
 use crate::error::SupervitError;
+use actrix_common::realm::{Realm, RealmConfig};
 use actrix_common::storage::is_database_initialized;
-use actrix_common::tenant::{Realm, TenantConfig};
-use actrix_proto::{ResourceType, TenantInfo};
+use actrix_proto::{RealmInfo, ResourceType};
 use chrono::Utc;
 use std::convert::TryFrom;
 use std::str::FromStr;
@@ -23,13 +23,13 @@ pub struct RealmMetadata {
     pub version: u64,
 }
 
-/// Convert a realm record and metadata into proto TenantInfo
-pub fn realm_to_proto(realm: &Realm, metadata: &RealmMetadata) -> TenantInfo {
+/// Convert a realm record and metadata into proto RealmInfo
+pub fn realm_to_proto(realm: &Realm, metadata: &RealmMetadata) -> RealmInfo {
     let created_at = realm.created_at.unwrap_or_else(|| Utc::now().timestamp());
     let updated_at = realm.updated_at.unwrap_or(created_at);
     let use_servers: Vec<i32> = metadata.use_servers.iter().map(|v| *v as i32).collect();
 
-    TenantInfo {
+    RealmInfo {
         realm_id: realm.realm_id,
         name: realm.name.clone(),
         enabled: metadata.enabled,
@@ -42,7 +42,7 @@ pub fn realm_to_proto(realm: &Realm, metadata: &RealmMetadata) -> TenantInfo {
     }
 }
 
-/// Load realm metadata from TenantConfig table
+/// Load realm metadata from RealmConfig table
 pub async fn load_realm_metadata(realm_rowid: u32) -> Result<RealmMetadata, SupervitError> {
     let enabled = load_enabled_flag(realm_rowid).await?;
     let use_servers = load_use_servers(realm_rowid).await?;
@@ -55,7 +55,7 @@ pub async fn load_realm_metadata(realm_rowid: u32) -> Result<RealmMetadata, Supe
     })
 }
 
-/// Persist realm metadata into TenantConfig table
+/// Persist realm metadata into RealmConfig table
 pub async fn persist_realm_metadata(
     realm_rowid: u32,
     metadata: &RealmMetadata,
@@ -71,7 +71,7 @@ pub async fn persist_realm_metadata(
 }
 
 async fn load_enabled_flag(realm_rowid: u32) -> Result<bool, SupervitError> {
-    let config = TenantConfig::get_by_tenant_and_key(realm_rowid, REALM_ENABLED_KEY)
+    let config = RealmConfig::get_by_realm_and_key(realm_rowid, REALM_ENABLED_KEY)
         .await
         .map_err(|e| SupervitError::Internal(format!("Failed to load realm enabled flag: {e}")))?;
 
@@ -83,7 +83,7 @@ async fn load_enabled_flag(realm_rowid: u32) -> Result<bool, SupervitError> {
 }
 
 async fn load_version(realm_rowid: u32) -> Result<u64, SupervitError> {
-    let config = TenantConfig::get_by_tenant_and_key(realm_rowid, REALM_VERSION_KEY)
+    let config = RealmConfig::get_by_realm_and_key(realm_rowid, REALM_VERSION_KEY)
         .await
         .map_err(|e| SupervitError::Internal(format!("Failed to load realm version: {e}")))?;
 
@@ -95,7 +95,7 @@ async fn load_version(realm_rowid: u32) -> Result<u64, SupervitError> {
 }
 
 async fn load_use_servers(realm_rowid: u32) -> Result<Vec<ResourceType>, SupervitError> {
-    let config = TenantConfig::get_by_tenant_and_key(realm_rowid, REALM_USE_SERVERS_KEY)
+    let config = RealmConfig::get_by_realm_and_key(realm_rowid, REALM_USE_SERVERS_KEY)
         .await
         .map_err(|e| SupervitError::Internal(format!("Failed to load realm services: {e}")))?;
 
@@ -111,7 +111,7 @@ async fn upsert_config_value(
     key: &str,
     value: String,
 ) -> Result<(), SupervitError> {
-    let existing = TenantConfig::get_by_tenant_and_key(realm_rowid, key)
+    let existing = RealmConfig::get_by_realm_and_key(realm_rowid, key)
         .await
         .map_err(|e| SupervitError::Internal(format!("Failed to read realm config: {e}")))?;
 
@@ -123,7 +123,7 @@ async fn upsert_config_value(
             })?;
         }
         None => {
-            let mut cfg = TenantConfig::new(realm_rowid, key.to_string(), value);
+            let mut cfg = RealmConfig::new(realm_rowid, key.to_string(), value);
             cfg.save().await.map_err(|e| {
                 SupervitError::Internal(format!("Failed to create realm config: {e}"))
             })?;

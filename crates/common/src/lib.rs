@@ -6,8 +6,8 @@ pub mod aid;
 pub mod error;
 pub mod metrics;
 pub mod monitoring;
+pub mod realm;
 pub mod storage;
-pub mod tenant;
 pub mod types;
 
 pub mod config;
@@ -20,8 +20,8 @@ pub use error::{
     ValidationError,
 };
 pub use monitoring::{ServiceCollector, ServiceInfo, ServiceState, ServiceType};
+pub use realm::{ActorAcl, Realm, RealmError};
 pub use storage::SqliteNonceStorage;
-pub use tenant::{ActorAcl, Realm, TenantError};
 pub use types::{ActrId, PeerId, RealmId};
 pub use util::TlsConfigurer;
 

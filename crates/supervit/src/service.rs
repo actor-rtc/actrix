@@ -2,15 +2,14 @@ use crate::error::Result as SupervitResult;
 use crate::metrics::collect_system_metrics;
 use crate::realm::{RealmMetadata, load_realm_metadata, persist_realm_metadata, realm_to_proto};
 use actrix_common::ServiceCollector;
-use actrix_common::tenant::{Realm, TenantConfig};
+use actrix_common::realm::{Realm, RealmConfig};
 use actrix_proto::SupervisedService;
 use actrix_proto::{
-    ConfigType, CreateTenantRequest, CreateTenantResponse, DeleteTenantRequest,
-    DeleteTenantResponse, GetConfigRequest, GetConfigResponse, GetNodeInfoRequest,
-    GetNodeInfoResponse, GetTenantRequest, GetTenantResponse, ListTenantsRequest,
-    ListTenantsResponse, ResourceType, ServiceStatus, ShutdownRequest, ShutdownResponse,
-    SystemMetrics, TenantInfo, UpdateConfigRequest, UpdateConfigResponse, UpdateTenantRequest,
-    UpdateTenantResponse,
+    ConfigType, CreateRealmRequest, CreateRealmResponse, DeleteRealmRequest, DeleteRealmResponse,
+    GetConfigRequest, GetConfigResponse, GetNodeInfoRequest, GetNodeInfoResponse, GetRealmRequest,
+    GetRealmResponse, ListRealmsRequest, ListRealmsResponse, RealmInfo, ResourceType,
+    ServiceStatus, ShutdownRequest, ShutdownResponse, SystemMetrics, UpdateConfigRequest,
+    UpdateConfigResponse, UpdateRealmRequest, UpdateRealmResponse,
 };
 use chrono::Utc;
 use std::collections::HashMap;
@@ -128,7 +127,7 @@ impl Supervisord {
         Ok((realm, metadata))
     }
 
-    async fn build_realm_info(&self, realm: Realm) -> GrpcResult<TenantInfo> {
+    async fn build_realm_info(&self, realm: Realm) -> GrpcResult<RealmInfo> {
         let rowid = realm.rowid.ok_or_else(|| {
             Status::internal(format!(
                 "Realm missing rowid for realm_id {}",
@@ -162,7 +161,7 @@ impl Supervisord {
 
     async fn delete_realm_configs(&self, realm: &Realm) -> GrpcResult<()> {
         if let Some(rowid) = realm.rowid {
-            TenantConfig::delete_by_tenant(rowid)
+            RealmConfig::delete_by_realm(rowid)
                 .await
                 .map_err(|e| Status::internal(format!("Failed to delete realm configs: {e}")))?;
         }
@@ -230,12 +229,12 @@ impl SupervisedService for Supervisord {
         }
     }
 
-    async fn create_tenant(
+    async fn create_realm(
         &self,
-        request: Request<CreateTenantRequest>,
-    ) -> GrpcResult<Response<CreateTenantResponse>> {
+        request: Request<CreateRealmRequest>,
+    ) -> GrpcResult<Response<CreateRealmResponse>> {
         let req = request.into_inner();
-        tracing::info!("CreateTenant request received: realm_id={}", req.realm_id);
+        tracing::info!("CreateRealm request received: realm_id={}", req.realm_id);
 
         let secret_key = req.secret_key.clone().unwrap_or_default();
         let use_servers: Vec<ResourceType> = req
@@ -255,10 +254,10 @@ impl SupervisedService for Supervisord {
         let save_result = realm.save().await;
 
         if let Err(err) = save_result {
-            let resp = CreateTenantResponse {
+            let resp = CreateRealmResponse {
                 success: false,
                 error_message: Some(format!("Failed to create realm: {}", err)),
-                tenant: None,
+                realm: None,
             };
             return Ok(Response::new(resp));
         }
@@ -287,46 +286,46 @@ impl SupervisedService for Supervisord {
                 );
             }
 
-            let response = CreateTenantResponse {
+            let response = CreateRealmResponse {
                 success: false,
                 error_message: Some(format!("Failed to persist realm metadata: {}", err_msg)),
-                tenant: None,
+                realm: None,
             };
             return Ok(Response::new(response));
         }
 
-        let tenant_info = realm_to_proto(&realm, &metadata);
+        let realm_info = realm_to_proto(&realm, &metadata);
 
-        let response = CreateTenantResponse {
+        let response = CreateRealmResponse {
             success: true,
             error_message: None,
-            tenant: Some(tenant_info),
+            realm: Some(realm_info),
         };
 
         Ok(Response::new(response))
     }
 
-    async fn get_tenant(
+    async fn get_realm(
         &self,
-        request: Request<GetTenantRequest>,
-    ) -> GrpcResult<Response<GetTenantResponse>> {
+        request: Request<GetRealmRequest>,
+    ) -> GrpcResult<Response<GetRealmResponse>> {
         let req = request.into_inner();
-        tracing::debug!("GetTenant request received: realm_id={}", req.realm_id);
+        tracing::debug!("GetRealm request received: realm_id={}", req.realm_id);
 
         match self.get_realm(req.realm_id).await {
             Ok((realm, metadata)) => {
-                let response = GetTenantResponse {
+                let response = GetRealmResponse {
                     success: true,
                     error_message: None,
-                    tenant: Some(realm_to_proto(&realm, &metadata)),
+                    realm: Some(realm_to_proto(&realm, &metadata)),
                 };
                 Ok(Response::new(response))
             }
             Err(status) if status.code() == tonic::Code::NotFound => {
-                let response = GetTenantResponse {
+                let response = GetRealmResponse {
                     success: false,
                     error_message: Some(status.message().to_string()),
-                    tenant: None,
+                    realm: None,
                 };
                 Ok(Response::new(response))
             }
@@ -334,20 +333,20 @@ impl SupervisedService for Supervisord {
         }
     }
 
-    async fn update_tenant(
+    async fn update_realm(
         &self,
-        request: Request<UpdateTenantRequest>,
-    ) -> GrpcResult<Response<UpdateTenantResponse>> {
+        request: Request<UpdateRealmRequest>,
+    ) -> GrpcResult<Response<UpdateRealmResponse>> {
         let req = request.into_inner();
 
         let realm_loaded = self.get_realm(req.realm_id).await;
         let (mut realm, mut metadata) = match realm_loaded {
             Ok(data) => data,
             Err(status) if status.code() == tonic::Code::NotFound => {
-                let response = UpdateTenantResponse {
+                let response = UpdateRealmResponse {
                     success: false,
                     error_message: Some(status.message().to_string()),
-                    tenant: None,
+                    realm: None,
                 };
                 return Ok(Response::new(response));
             }
@@ -366,10 +365,10 @@ impl SupervisedService for Supervisord {
 
         let save_result = realm.save().await;
         if let Err(err) = save_result {
-            let response = UpdateTenantResponse {
+            let response = UpdateRealmResponse {
                 success: false,
                 error_message: Some(format!("Failed to update realm: {}", err)),
-                tenant: None,
+                realm: None,
             };
             return Ok(Response::new(response));
         }
@@ -396,27 +395,27 @@ impl SupervisedService for Supervisord {
                 );
             }
 
-            let response = UpdateTenantResponse {
+            let response = UpdateRealmResponse {
                 success: false,
                 error_message: Some(format!("Failed to persist realm metadata: {}", err_msg)),
-                tenant: None,
+                realm: None,
             };
             return Ok(Response::new(response));
         }
 
-        let response = UpdateTenantResponse {
+        let response = UpdateRealmResponse {
             success: true,
             error_message: None,
-            tenant: Some(realm_to_proto(&realm, &metadata)),
+            realm: Some(realm_to_proto(&realm, &metadata)),
         };
 
         Ok(Response::new(response))
     }
 
-    async fn delete_tenant(
+    async fn delete_realm(
         &self,
-        request: Request<DeleteTenantRequest>,
-    ) -> GrpcResult<Response<DeleteTenantResponse>> {
+        request: Request<DeleteRealmRequest>,
+    ) -> GrpcResult<Response<DeleteRealmResponse>> {
         let req = request.into_inner();
 
         let realm = Realm::get_by_realm_id(req.realm_id)
@@ -424,7 +423,7 @@ impl SupervisedService for Supervisord {
             .map_err(|e| Status::internal(format!("Failed to load realm: {e}")))?;
 
         let Some(realm) = realm else {
-            let response = DeleteTenantResponse {
+            let response = DeleteRealmResponse {
                 success: false,
                 error_message: Some("Realm not found".to_string()),
             };
@@ -436,21 +435,21 @@ impl SupervisedService for Supervisord {
         match delete_result {
             Ok(affected) if affected > 0 => {
                 self.delete_realm_configs(&realm).await?;
-                let response = DeleteTenantResponse {
+                let response = DeleteRealmResponse {
                     success: true,
                     error_message: None,
                 };
                 Ok(Response::new(response))
             }
             Ok(_) => {
-                let response = DeleteTenantResponse {
+                let response = DeleteRealmResponse {
                     success: false,
                     error_message: Some("Realm not found".to_string()),
                 };
                 Ok(Response::new(response))
             }
             Err(err) => {
-                let response = DeleteTenantResponse {
+                let response = DeleteRealmResponse {
                     success: false,
                     error_message: Some(format!("Failed to delete realm: {}", err)),
                 };
@@ -459,13 +458,13 @@ impl SupervisedService for Supervisord {
         }
     }
 
-    async fn list_tenants(
+    async fn list_realms(
         &self,
-        request: Request<ListTenantsRequest>,
-    ) -> GrpcResult<Response<ListTenantsResponse>> {
+        request: Request<ListRealmsRequest>,
+    ) -> GrpcResult<Response<ListRealmsResponse>> {
         let req = request.into_inner();
         tracing::debug!(
-            "ListTenants request received: page_size={:?}, page_token={:?}",
+            "ListRealms request received: page_size={:?}, page_token={:?}",
             req.page_size,
             req.page_token
         );
@@ -474,20 +473,20 @@ impl SupervisedService for Supervisord {
             .await
             .map_err(|e| Status::internal(format!("Failed to load realm list: {}", e)))?;
 
-        let mut tenants = Vec::with_capacity(realms.len());
+        let mut realms_info = Vec::with_capacity(realms.len());
         for realm in realms {
             match self.build_realm_info(realm).await {
-                Ok(info) => tenants.push(info),
+                Ok(info) => realms_info.push(info),
                 Err(e) => warn!("Skip realm due to metadata error: {}", e),
             }
         }
 
-        let total_count = tenants.len() as u32;
+        let total_count = realms_info.len() as u32;
 
-        let response = ListTenantsResponse {
+        let response = ListRealmsResponse {
             success: true,
             error_message: None,
-            tenants,
+            realms: realms_info,
             next_page_token: None,
             total_count,
         };

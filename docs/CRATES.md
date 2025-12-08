@@ -22,19 +22,19 @@
 
 ## 1. base - 基础设施库
 
-**位置**: `crates/base/`
+**位置**: `crates/common/`
 **功能**: 为所有服务提供基础设施组件
 
 ### 1.1 模块结构
 
-**文件**: `crates/base/src/lib.rs:5-13`
+**文件**: `crates/common/src/lib.rs:5-13`
 
 ```rust
 pub mod aid;              // Actor Identity 管理
 pub mod error;            // 错误类型定义
 pub mod monitoring;       // 服务状态监控
 pub mod storage;          // 存储抽象
-pub mod tenant;           // Realm 管理
+pub mod realm;            // Realm 管理
 pub mod types;            // 通用类型定义
 pub mod config;           // 配置系统
 pub mod util;             // 工具函数
@@ -70,7 +70,7 @@ pub struct ActrixConfig {
 
 #### 1.2.2 服务启用位掩码
 
-**文件**: `crates/base/src/config/mod.rs:186-190`
+**文件**: `crates/common/src/config/mod.rs:186-190`
 
 ```rust
 pub const ENABLE_SIGNALING: u8 = 0b00001;  // 位 0 (1)
@@ -89,7 +89,7 @@ enable = 1   # 仅启用 Signaling
 
 #### 1.2.3 服务检查方法
 
-**文件**: `crates/base/src/config/mod.rs:193-233`
+**文件**: `crates/common/src/config/mod.rs:193-233`
 
 ```rust
 impl ActrixConfig {
@@ -122,7 +122,7 @@ impl ActrixConfig {
 
 #### 1.2.4 配置验证
 
-**文件**: `crates/base/src/config/mod.rs:316-403`
+**文件**: `crates/common/src/config/mod.rs:316-403`
 
 完整的配置验证逻辑:
 
@@ -189,7 +189,7 @@ pub fn validate(&self) -> Result<(), Vec<String>> {
 
 #### 1.2.5 TracingConfig - OpenTelemetry 追踪配置
 
-**文件**: `crates/base/src/config/tracing.rs:1-80`
+**文件**: `crates/common/src/config/tracing.rs:1-80`
 
 ```rust
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -226,7 +226,7 @@ impl TracingConfig {
 
 #### 1.3.1 SqliteNonceStorage - Nonce 存储
 
-**文件**: `crates/base/src/storage/nonce_storage.rs:1-150`
+**文件**: `crates/common/src/storage/nonce_storage.rs:1-150`
 
 用于防重放攻击的 Nonce 存储:
 
@@ -283,7 +283,7 @@ impl nonce_auth::StorageBackend for SqliteNonceStorage {
 
 #### 1.4.1 模块结构
 
-**文件**: `crates/base/src/aid/mod.rs:1-11`
+**文件**: `crates/common/src/aid/mod.rs:1-11`
 
 ```rust
 pub mod identity_claims;  // Identity Claims 定义
@@ -377,7 +377,7 @@ fn encrypt_claims(
 
 #### 1.4.4 KeyCache - 密钥缓存
 
-**文件**: `crates/base/src/aid/key_cache.rs:20-120`
+**文件**: `crates/common/src/aid/key_cache.rs:20-120`
 
 用于缓存从 KS 服务获取的密钥:
 
@@ -434,7 +434,7 @@ impl KeyCache {
 
 ### 1.5 错误类型系统 (error)
 
-**文件**: `crates/base/src/error/mod.rs:10-80`
+**文件**: `crates/common/src/error/mod.rs:10-80`
 
 ```rust
 #[derive(Debug, Error)]
@@ -461,29 +461,29 @@ pub enum BaseError {
 pub type Result<T> = std::result::Result<T, BaseError>;
 ```
 
-### 1.6 Realm 管理 (tenant)
+### 1.6 Realm 管理
 
-**文件**: `crates/base/src/tenant/mod.rs:15-100`
+**文件**: `crates/common/src/realm/mod.rs`
 
 ```rust
-pub struct Tenant {
-    pub id: RealmId,         // Realm 唯一 ID
-    pub name: String,         // Realm 名称
-    pub created_at: i64,      // 创建时间
-    pub status: TenantStatus, // 状态: Active/Suspended/Deleted
+pub struct Realm {
+    pub rowid: Option<u32>,
+    pub realm_id: u32,         // Realm 唯一 ID
+    pub name: String,          // Realm 名称
+    pub key_id: String,        // 密钥 ID
+    pub secret_key: Vec<u8>,   // 私钥
+    pub public_key: Vec<u8>,   // 公钥
+    pub expires_at: Option<i64>, // 过期时间
+    pub created_at: Option<i64>, // 创建时间
+    pub updated_at: Option<i64>, // 更新时间
 }
 
 pub struct ActorAcl {
-    pub actor_id: ActrId,     // Actor ID
-    pub realm_id: RealmId,  // 所属 Realm
-    pub permissions: Vec<Permission>, // 权限列表
-}
-
-pub enum Permission {
-    UseSignaling,   // 使用信令服务
-    UseSTUN,        // 使用 STUN 服务
-    UseTURN,        // 使用 TURN 服务
-    Admin,          // 管理员权限
+    pub rowid: Option<i64>,
+    pub realm_id: u32,        // 所属 Realm
+    pub from_type: String,    // 源 Actor 类型
+    pub to_type: String,      // 目标 Actor 类型
+    pub access: bool,          // 访问权限（true = 允许，false = 拒绝）
 }
 ```
 
@@ -491,7 +491,7 @@ pub enum Permission {
 
 #### 1.7.1 TlsConfigurer - TLS 配置
 
-**文件**: `crates/base/src/util/tls.rs:15-80`
+**文件**: `crates/common/src/util/tls.rs:15-80`
 
 ```rust
 pub struct TlsConfigurer;
@@ -2141,7 +2141,7 @@ actrix (main binary)
 
 ### base crate
 
-**文件**: `crates/base/Cargo.toml:30-35`
+**文件**: `crates/common/Cargo.toml:30-35`
 
 ```toml
 [features]
