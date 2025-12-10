@@ -51,10 +51,8 @@ impl Database {
             "CREATE TABLE IF NOT EXISTS realm (
                 rowid INTEGER PRIMARY KEY AUTOINCREMENT,
                 realm_id INTEGER NOT NULL,
-                key_id INTEGER NOT NULL,
-                secret_key BLOB NOT NULL,
                 name TEXT NOT NULL,
-                public_key BLOB NOT NULL,
+                status TEXT NOT NULL DEFAULT 'Normal',
                 expires_at INTEGER,
                 created_at INTEGER,
                 updated_at INTEGER,
@@ -68,7 +66,7 @@ impl Database {
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS realmconfig (
                 rowid INTEGER PRIMARY KEY AUTOINCREMENT,
-                realm_id INTEGER NOT NULL,
+                realm_rowid INTEGER NOT NULL,
                 key TEXT NOT NULL,
                 value TEXT NOT NULL
             )",
@@ -91,15 +89,15 @@ impl Database {
 
         // 创建索引
         sqlx::query(
-            "CREATE INDEX IF NOT EXISTS idx_realm_realm_id_key_id
-             ON realm(realm_id, key_id)",
+            "CREATE INDEX IF NOT EXISTS idx_realm_realm_id
+             ON realm(realm_id)",
         )
         .execute(&self.pool)
         .await?;
 
         sqlx::query(
-            "CREATE INDEX IF NOT EXISTS idx_realmconfig_realm_id
-             ON realmconfig(realm_id)",
+            "CREATE INDEX IF NOT EXISTS idx_realmconfig_realm_rowid
+             ON realmconfig(realm_rowid)",
         )
         .execute(&self.pool)
         .await?;
