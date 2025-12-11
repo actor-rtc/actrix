@@ -68,8 +68,8 @@ pub struct KSState {
     pub storage: KeyStorage,
     pub nonce_storage: Arc<dyn NonceStorage + Send + Sync>,
     pub psk: String,
-    /// 宽限期（秒）
-    pub grace_period_seconds: u64,
+    /// 容忍期（秒）
+    pub tolerance_seconds: u64,
     /// 请求计数器（用于惰性清理触发）
     request_counter: Arc<AtomicU32>,
 }
@@ -79,13 +79,13 @@ impl KSState {
         storage: KeyStorage,
         nonce_storage: N,
         psk: String,
-        grace_period_seconds: u64,
+        tolerance_seconds: u64,
     ) -> Self {
         Self {
             storage,
             nonce_storage: Arc::new(nonce_storage),
             psk,
-            grace_period_seconds,
+            tolerance_seconds,
             request_counter: Arc::new(AtomicU32::new(0)),
         }
     }
@@ -197,7 +197,7 @@ pub async fn create_ks_state<N: NonceStorage + Send + Sync + 'static>(
         key_storage,
         nonce_storage,
         actrix_shared_key.to_string(),
-        service_config.grace_period_seconds,
+        service_config.tolerance_seconds,
     ))
 }
 
@@ -345,18 +345,22 @@ async fn get_secret_key_handler(
     // 获取完整的密钥记录
     match app_state.storage.get_key_record(key_id).await? {
         Some(key_record) => {
-            // 检查密钥是否过期
-            if key_record.expires_at > 0 {
+            // 检查密钥是否过期，并计算是否在容忍期
+            let in_tolerance_period = if key_record.expires_at > 0 {
                 let now = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap()
                     .as_secs();
 
-                // 检查是否超过了过期时间 + 宽限期
-                if key_record.expires_at + app_state.grace_period_seconds < now {
+                // 检查是否在容忍期内：已过期但未超过容忍期
+                let is_in_tolerance = key_record.expires_at < now
+                    && key_record.expires_at + app_state.tolerance_seconds >= now;
+
+                // 检查是否超过了过期时间 + 容忍期
+                if key_record.expires_at + app_state.tolerance_seconds < now {
                     warn!(
-                        "Key {} has expired (grace period ended). Expires at: {}, Grace period: {}s, Now: {}",
-                        key_id, key_record.expires_at, app_state.grace_period_seconds, now
+                        "Key {} has expired (tolerance period ended). Expires at: {}, Tolerance period: {}s, Now: {}",
+                        key_id, key_record.expires_at, app_state.tolerance_seconds, now
                     );
                     let duration = start_time.elapsed().as_secs_f64();
                     KS_REQUEST_DURATION
@@ -367,7 +371,18 @@ async fn get_secret_key_handler(
                         .inc();
                     return Err(KsError::KeyNotFound(key_id));
                 }
-            }
+
+                if is_in_tolerance {
+                    warn!(
+                        "Key {} is in tolerance period (expired at: {}, now: {})",
+                        key_id, key_record.expires_at, now
+                    );
+                }
+
+                is_in_tolerance
+            } else {
+                false // 永不过期的密钥不在容忍期
+            };
 
             // 获取私钥
             let secret_key = app_state
@@ -380,6 +395,7 @@ async fn get_secret_key_handler(
                 key_id,
                 secret_key,
                 expires_at: key_record.expires_at,
+                in_tolerance_period,
             };
 
             // 记录成功的请求指标
@@ -454,7 +470,7 @@ mod tests {
             kek: None,
             kek_env: None,
             kek_file: None,
-            grace_period_seconds: 3600,
+            tolerance_seconds: 3600,
         };
 
         let psk = "test-psk".to_string();
@@ -492,7 +508,7 @@ mod tests {
             kek: None,
             kek_env: None,
             kek_file: None,
-            grace_period_seconds: 3600,
+            tolerance_seconds: 3600,
         };
 
         let nonce_storage = MemoryStorage::new();
@@ -524,7 +540,7 @@ mod tests {
             kek: None,
             kek_env: None,
             kek_file: None,
-            grace_period_seconds: 3600,
+            tolerance_seconds: 3600,
         };
 
         let nonce_storage = MemoryStorage::new();
@@ -551,7 +567,7 @@ mod tests {
             kek: None,
             kek_env: None,
             kek_file: None,
-            grace_period_seconds: 3600,
+            tolerance_seconds: 3600,
         };
 
         let nonce_storage = MemoryStorage::new();
