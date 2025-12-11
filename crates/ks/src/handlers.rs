@@ -68,8 +68,8 @@ pub struct KSState {
     pub storage: KeyStorage,
     pub nonce_storage: Arc<dyn NonceStorage + Send + Sync>,
     pub psk: String,
-    /// 宽限期（秒）
-    pub grace_period_seconds: u64,
+    /// 容忍期（秒）
+    pub tolerance_seconds: u64,
     /// 请求计数器（用于惰性清理触发）
     request_counter: Arc<AtomicU32>,
 }
@@ -79,13 +79,13 @@ impl KSState {
         storage: KeyStorage,
         nonce_storage: N,
         psk: String,
-        grace_period_seconds: u64,
+        tolerance_seconds: u64,
     ) -> Self {
         Self {
             storage,
             nonce_storage: Arc::new(nonce_storage),
             psk,
-            grace_period_seconds,
+            tolerance_seconds,
             request_counter: Arc::new(AtomicU32::new(0)),
         }
     }
@@ -197,7 +197,7 @@ pub async fn create_ks_state<N: NonceStorage + Send + Sync + 'static>(
         key_storage,
         nonce_storage,
         actrix_shared_key.to_string(),
-        service_config.grace_period_seconds,
+        service_config.tolerance_seconds,
     ))
 }
 
@@ -470,7 +470,7 @@ mod tests {
             kek: None,
             kek_env: None,
             kek_file: None,
-            grace_period_seconds: 3600,
+            tolerance_seconds: 3600,
         };
 
         let psk = "test-psk".to_string();
@@ -508,7 +508,7 @@ mod tests {
             kek: None,
             kek_env: None,
             kek_file: None,
-            grace_period_seconds: 3600,
+            tolerance_seconds: 3600,
         };
 
         let nonce_storage = MemoryStorage::new();
@@ -540,7 +540,7 @@ mod tests {
             kek: None,
             kek_env: None,
             kek_file: None,
-            grace_period_seconds: 3600,
+            tolerance_seconds: 3600,
         };
 
         let nonce_storage = MemoryStorage::new();
@@ -567,7 +567,7 @@ mod tests {
             kek: None,
             kek_env: None,
             kek_file: None,
-            grace_period_seconds: 3600,
+            tolerance_seconds: 3600,
         };
 
         let nonce_storage = MemoryStorage::new();
