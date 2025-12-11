@@ -88,17 +88,17 @@ message ServiceStatus {
 }
 
 // ============================================================================
-// Tenant information (shared)
+// Realm information (shared)
 // ============================================================================
 
-message TenantInfo {
-  required string tenant_id = 1;            // Tenant identifier
-  required string name = 2;                 // Tenant name
+message RealmInfo {
+  required uint32 realm_id = 1;            // Realm identifier
+  required string name = 2;                 // Realm name
   required bool enabled = 3;                // Enabled status
   required int64 created_at = 4;            // Creation timestamp
   optional int64 updated_at = 5;            // Update timestamp (empty if never updated)
-  required bytes public_key = 6;            // Public key for authentication
-  required string key_id = 7;               // Key ID for key rotation
-  repeated ResourceType use_servers = 8;    // Allowed server types
-  required uint64 version = 9;              // Realm version (assigned by Boss for sync tracking)
+  repeated ResourceType use_servers = 6;    // Allowed server types
+  required uint64 version = 7;              // Realm version (assigned by Boss for sync tracking)
+  required uint64 expires_at = 8;           // Expiration timestamp (Unix timestamp)
+  required string status = 9;               // Realm status (Normal, Suspended, Terminated)
 }

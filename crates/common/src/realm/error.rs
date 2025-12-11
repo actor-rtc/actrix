@@ -1,21 +1,21 @@
-//! 租户错误类型定义
+//! Realm 错误类型定义
 //!
-//! 定义了租户管理相关的错误类型
+//! 定义了 Realm 管理相关的错误类型
 
 use thiserror::Error;
 
 #[derive(Debug, Error)]
-pub enum TenantError {
+pub enum RealmError {
     #[error("Database error: {0}")]
     DatabaseError(String),
 
     #[error("Validation error: {0}")]
     ValidationError(String),
 
-    #[error("Tenant not found")]
+    #[error("Realm not found")]
     NotFound,
 
-    #[error("Tenant already exists")]
+    #[error("Realm already exists")]
     AlreadyExists,
 
     #[error("Key expired")]
@@ -28,8 +28,8 @@ pub enum TenantError {
     ParseError(String),
 }
 
-impl From<sqlx::Error> for TenantError {
+impl From<sqlx::Error> for RealmError {
     fn from(err: sqlx::Error) -> Self {
-        TenantError::DatabaseError(err.to_string())
+        RealmError::DatabaseError(err.to_string())
     }
 }
