@@ -1730,38 +1730,28 @@ async fn handle_get_service_spec_request(
     server: &SignalingServerHandle,
     request_envelope_id: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    let service_name = req.name.as_str();
     info!(
-        "Handle GetServiceSpec request for Actor {}: type={}/{}, fingerprint={:?}",
-        source.serial_number, req.actr_type.manufacturer, req.actr_type.name, req.fingerprint
+        "Handle GetServiceSpec request for Actor {} name={}",
+        source.to_string_repr(),
+        service_name
     );
 
     // Find matching ServiceSpec in ServiceRegistry
-    let registry = server.service_registry.read().await;
-    let candidates = registry.find_by_actr_type(&req.actr_type);
-    drop(registry);
-
-    // Find matching fingerprint spec
-    let service_spec = candidates.into_iter().find_map(|service| {
-        if let Some(spec) = service.service_spec {
-            if let Some(ref target_fp) = req.fingerprint {
-                if spec.fingerprint == *target_fp {
-                    return Some(spec);
-                }
-            } else {
-                // If no fingerprint is specified, return the first one
-                return Some(spec);
-            }
-        }
-        None
-    });
-
-    let result = match service_spec {
-        Some(spec) => actr_protocol::get_service_spec_response::Result::Success(spec),
-        None => actr_protocol::get_service_spec_response::Result::Error(ErrorResponse {
-            code: 404,
-            message: "Service specification not found".to_string(),
-        }),
-    };
+    let result = server
+        .service_registry
+        .read()
+        .await
+        .discover_by_service_name(service_name)
+        .into_iter()
+        .find_map(|service| service.service_spec.clone())
+        .map(actr_protocol::get_service_spec_response::Result::Success)
+        .unwrap_or_else(|| {
+            actr_protocol::get_service_spec_response::Result::Error(ErrorResponse {
+                code: 404,
+                message: format!("Service specification not found for name={}", service_name),
+            })
+        });
 
     let response = actr_protocol::GetServiceSpecResponse {
         result: Some(result),
