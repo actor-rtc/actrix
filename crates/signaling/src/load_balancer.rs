@@ -442,22 +442,19 @@ impl LoadBalancer {
             );
 
             // 查询缓存
-            let response = cache.query(&cache_key);
+            let response = cache.query_readonly(&cache_key);
 
             // 转换为分数
-            candidate.protocol_compatibility_score = if let Some(result) = response.result {
-                let score = match result.as_str() {
-                    "compatible" => 1.0,
-                    "backward_compatible" => 0.5,
-                    "incompatible" => 0.0,
-                    _ => {
-                        warn!("未知的兼容性结果: {}", result);
-                        0.0
-                    }
+            candidate.protocol_compatibility_score = if let Some(result) = response.analysis_result
+            {
+                let score = match result.level {
+                    actr_version::CompatibilityLevel::FullyCompatible => 1.0,
+                    actr_version::CompatibilityLevel::BackwardCompatible => 0.5,
+                    actr_version::CompatibilityLevel::BreakingChanges => 0.0,
                 };
                 debug!(
-                    "候选 {:?}: 兼容性={}, 分数={}",
-                    candidate.actor_id, result, score
+                    "候选 {:?}: 兼容性={:?}, 分数={}",
+                    candidate.actor_id, result.level, score
                 );
                 Some(score)
             } else {
