@@ -1680,9 +1680,8 @@ async fn handle_route_candidates_request(
 
     // 兼容性协商逻辑
     let (ranked_actor_ids, compatibility_info, has_exact_match, is_sub_healthy) =
-        if client_fingerprint.is_some() {
+        if let Some(client_fp) = &client_fingerprint {
             // 有 client_fingerprint 就启用协商模式
-            let client_fp = client_fingerprint.as_ref().unwrap();
             perform_compatibility_negotiation(
                 &acl_filtered_candidates,
                 client_fp,

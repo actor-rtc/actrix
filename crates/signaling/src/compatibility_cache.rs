@@ -238,8 +238,8 @@ mod tests {
             level,
             changes: vec![],
             breaking_changes: vec![],
-            from_fingerprint: "fp1".to_string(),
-            to_fingerprint: "fp2".to_string(),
+            base_semantic_fingerprint: "fp1".to_string(),
+            candidate_semantic_fingerprint: "fp2".to_string(),
             analyzed_at: chrono::Utc::now(),
         }
     }
