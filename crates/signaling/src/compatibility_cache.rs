@@ -104,15 +104,15 @@ impl GlobalCompatibilityCache {
 
     /// 查询（不可变版本，不更新命中计数）
     pub fn query_readonly(&self, cache_key: &str) -> CompatibilityCacheResponse {
-        if let Some(entry) = self.cache.get(cache_key) {
-            if SystemTime::now() <= entry.expires_at {
-                debug!("兼容性缓存命中 (readonly): {}", cache_key);
-                return CompatibilityCacheResponse {
-                    cache_key: cache_key.to_string(),
-                    analysis_result: Some(entry.analysis_result.clone()),
-                    hit: true,
-                };
-            }
+        if let Some(entry) = self.cache.get(cache_key)
+            && SystemTime::now() <= entry.expires_at
+        {
+            debug!("兼容性缓存命中 (readonly): {}", cache_key);
+            return CompatibilityCacheResponse {
+                cache_key: cache_key.to_string(),
+                analysis_result: Some(entry.analysis_result.clone()),
+                hit: true,
+            };
         }
 
         CompatibilityCacheResponse {
@@ -137,11 +137,11 @@ impl GlobalCompatibilityCache {
             self.cleanup_expired();
         }
 
-        if self.cache.len() >= self.max_entries {
-            if let Some(oldest_key) = self.find_oldest_entry() {
-                self.cache.remove(&oldest_key);
-                debug!("缓存已满，移除最旧条目: {}", oldest_key);
-            }
+        if self.cache.len() >= self.max_entries
+            && let Some(oldest_key) = self.find_oldest_entry()
+        {
+            self.cache.remove(&oldest_key);
+            debug!("缓存已满，移除最旧条目: {}", oldest_key);
         }
 
         if let Some(existing) = self.cache.get_mut(&cache_key) {
@@ -202,10 +202,11 @@ impl GlobalCompatibilityCache {
     ) -> Option<&CompatibilityAnalysisResult> {
         let now = SystemTime::now();
         for (key, entry) in &self.cache {
-            if key.contains(from_fingerprint) && key.contains(to_fingerprint) {
-                if entry.expires_at > now {
-                    return Some(&entry.analysis_result);
-                }
+            if key.contains(from_fingerprint)
+                && key.contains(to_fingerprint)
+                && entry.expires_at > now
+            {
+                return Some(&entry.analysis_result);
             }
         }
         None

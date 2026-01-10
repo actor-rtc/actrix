@@ -42,13 +42,13 @@ impl ServiceRegistryStorage {
         let db_path = database_file.as_ref();
 
         // 确保数据库目录存在
-        if let Some(parent) = db_path.parent() {
-            if !parent.exists() {
-                std::fs::create_dir_all(parent).with_context(|| {
-                    format!("Failed to create database directory: {}", parent.display())
-                })?;
-                info!("📁 Created database directory: {}", parent.display());
-            }
+        if let Some(parent) = db_path.parent()
+            && !parent.exists()
+        {
+            std::fs::create_dir_all(parent).with_context(|| {
+                format!("Failed to create database directory: {}", parent.display())
+            })?;
+            info!("📁 Created database directory: {}", parent.display());
         }
 
         let pool = SqlitePoolOptions::new()
