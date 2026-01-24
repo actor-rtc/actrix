@@ -389,7 +389,7 @@ async fn handle_peer_to_server(
                 send_register_error(
                     client_id,
                     403,
-                    &format!("Realm validation failed: {}", e),
+                    &format!("Realm validation failed: {e}"),
                     server,
                     request_envelope_id,
                 )
@@ -2133,7 +2133,7 @@ async fn handle_get_service_spec_request(
         .unwrap_or_else(|| {
             actr_protocol::get_service_spec_response::Result::Error(ErrorResponse {
                 code: 404,
-                message: format!("Service specification not found for name={}", service_name),
+                message: format!("Service specification not found for name={service_name}"),
             })
         });
 
@@ -2349,11 +2349,11 @@ mod tests {
             // 创建 clients map
             let mut clients = HashMap::new();
             clients.insert(
-                format!("client_{}", from_serial),
+                format!("client_{from_serial}"),
                 create_test_client(from.clone(), from_role.map(|s| s.to_string())),
             );
             clients.insert(
-                format!("client_{}", to_serial),
+                format!("client_{to_serial}"),
                 create_test_client(to.clone(), to_role.map(|s| s.to_string())),
             );
 
@@ -2361,8 +2361,7 @@ mod tests {
 
             assert_eq!(
                 is_offerer, expected,
-                "测试失败: {} (from={}, to={}, from_role={:?}, to_role={:?})",
-                desc, from_serial, to_serial, from_role, to_role
+                "测试失败: {desc} (from={from_serial}, to={to_serial}, from_role={from_role:?}, to_role={to_role:?})"
             );
         }
     }

@@ -307,7 +307,7 @@ async fn handle_websocket(
     }
 
     // 提取 webrtc_role 参数（如果存在）
-    let webrtc_role = params.get("webrtc_role").map(|s| s.clone());
+    let webrtc_role = params.get("webrtc_role").cloned();
     if let Some(ref role) = webrtc_role {
         info!("🎭 WebRTC 角色: {}", role);
     }
