@@ -617,6 +617,84 @@ impl ServiceRegistry {
         }
     }
 
+    /// 从数据库恢复服务（心跳恢复时使用）
+    ///
+    /// 当收到心跳但内存中找不到服务时，尝试从数据库恢复。
+    /// 这通常发生在断网超过 5 分钟（内存清理阈值）但小于 1 小时（数据库 TTL）的情况。
+    ///
+    /// # Arguments
+    ///
+    /// * `actor_id` - 要恢复的 Actor ID
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(true)` - 成功从数据库恢复了至少一个服务
+    /// * `Ok(false)` - 数据库中没有找到该 Actor 的服务（可能已过期或从未注册）
+    /// * `Err(String)` - 恢复过程出错
+    pub async fn restore_service_from_storage(
+        &mut self,
+        actor_id: &ActrId,
+    ) -> Result<bool, String> {
+        // 检查是否有存储后端
+        let storage = match &self.storage {
+            Some(s) => s,
+            None => {
+                debug!("No storage backend available for service recovery");
+                return Ok(false);
+            }
+        };
+
+        // 从数据库加载该 Actor 的服务
+        let services = storage
+            .load_services_by_actor_id(actor_id)
+            .await
+            .map_err(|e| format!("Failed to load services from storage: {}", e))?;
+
+        if services.is_empty() {
+            debug!(
+                "No services found in storage for Actor {}",
+                actor_id.serial_number
+            );
+            return Ok(false);
+        }
+
+        info!(
+            "🔄 Restoring {} service(s) from storage for Actor {}",
+            services.len(),
+            actor_id.serial_number
+        );
+
+        // 将每个服务重新注册到内存
+        for service in services {
+            // 添加到服务映射表
+            self.services
+                .entry(service.service_name.clone())
+                .or_default()
+                .push(service.clone());
+
+            // 更新消息类型索引
+            for message_type in &service.message_types {
+                self.message_type_index
+                    .entry(message_type.clone())
+                    .or_default()
+                    .push(service.service_name.clone());
+            }
+
+            // 更新 Actor 索引
+            self.actor_index
+                .entry(service.actor_id.clone())
+                .or_default()
+                .push(service.service_name.clone());
+
+            info!(
+                "  ✅ Restored service: {} (Actor {})",
+                service.service_name, service.actor_id.serial_number
+            );
+        }
+
+        Ok(true)
+    }
+
     /// 获取所有服务统计信息
     pub fn get_service_stats(&self) -> HashMap<String, usize> {
         self.services
