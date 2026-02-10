@@ -36,6 +36,9 @@ pub struct ServiceRegistryStorage {
     proto_ttl_secs: u64,
 }
 
+/// 默认服务 TTL（1 小时）
+pub const DEFAULT_SERVICE_TTL_SECS: u64 = 12 * 3600; // 临时方案
+
 impl ServiceRegistryStorage {
     /// 创建存储实例
     pub async fn new(database_file: impl AsRef<Path>, ttl_secs: Option<u64>) -> Result<Self> {
@@ -59,8 +62,8 @@ impl ServiceRegistryStorage {
 
         let storage = Self {
             pool,
-            default_ttl_secs: ttl_secs.unwrap_or(3600), // 默认 1 小时
-            proto_ttl_secs: 604800,                     // Proto specs 默认 7 天
+            default_ttl_secs: ttl_secs.unwrap_or(DEFAULT_SERVICE_TTL_SECS),
+            proto_ttl_secs: 604800, // Proto specs 默认 7 天
         };
 
         storage.init_schema().await?;
