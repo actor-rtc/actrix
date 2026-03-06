@@ -17,9 +17,14 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install protoc
+        if: runner.os != 'macOS'
         uses: arduino/setup-protoc@v2
         with:
           version: "25.1"
+
+      - name: Install protoc (macOS)
+        if: runner.os == 'macOS'
+        run: brew install protobuf
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -49,9 +54,14 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install protoc
+        if: runner.os != 'macOS'
         uses: arduino/setup-protoc@v2
         with:
           version: "25.1"
+
+      - name: Install protoc (macOS)
+        if: runner.os == 'macOS'
+        run: brew install protobuf
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -82,9 +92,14 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install protoc
+        if: runner.os != 'macOS'
         uses: arduino/setup-protoc@v2
         with:
           version: "25.1"
+
+      - name: Install protoc (macOS)
+        if: runner.os == 'macOS'
+        run: brew install protobuf
 
       - uses: dtolnay/rust-toolchain@stable
 
