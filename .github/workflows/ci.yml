@@ -112,3 +112,11 @@ jobs:
         with:
           name: ${{ matrix.platform.artifact_name }}
           path: ${{ matrix.platform.binary_path }}
+
+  build-release-status:
+    name: Build Release
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Confirm release builds succeeded
+        run: echo "All release build matrix jobs completed successfully."
