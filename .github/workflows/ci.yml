@@ -84,9 +84,6 @@ jobs:
           - os: macos-14
             artifact_name: actrix-macos-arm64
             binary_path: target/release/actrix
-          - os: windows-latest
-            artifact_name: actrix-windows-x86_64
-            binary_path: target/release/actrix.exe
     runs-on: ${{ matrix.platform.os }}
     steps:
       - uses: actions/checkout@v4
