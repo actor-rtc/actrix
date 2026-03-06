@@ -17,14 +17,9 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install protoc
-        if: runner.os != 'macOS'
-        uses: arduino/setup-protoc@v2
-        with:
-          version: "25.1"
-
-      - name: Install protoc (macOS)
-        if: runner.os == 'macOS'
-        run: brew install protobuf
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y protobuf-compiler
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -54,14 +49,9 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install protoc
-        if: runner.os != 'macOS'
-        uses: arduino/setup-protoc@v2
-        with:
-          version: "25.1"
-
-      - name: Install protoc (macOS)
-        if: runner.os == 'macOS'
-        run: brew install protobuf
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y protobuf-compiler
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -88,11 +78,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install protoc
-        if: runner.os != 'macOS'
-        uses: arduino/setup-protoc@v2
-        with:
-          version: "25.1"
+      - name: Install protoc (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y protobuf-compiler
 
       - name: Install protoc (macOS)
         if: runner.os == 'macOS'
