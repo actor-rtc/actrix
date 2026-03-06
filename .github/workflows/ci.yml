@@ -63,8 +63,21 @@ jobs:
       - run: cargo clippy --workspace --all-features -- -D warnings
 
   build:
-    name: Build Release
-    runs-on: ubuntu-latest
+    name: Build Release (${{ matrix.platform.artifact_name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - os: ubuntu-latest
+            artifact_name: actrix-linux-x86_64
+            binary_path: target/release/actrix
+          - os: macos-14
+            artifact_name: actrix-macos-arm64
+            binary_path: target/release/actrix
+          - os: windows-latest
+            artifact_name: actrix-windows-x86_64
+            binary_path: target/release/actrix.exe
+    runs-on: ${{ matrix.platform.os }}
     steps:
       - uses: actions/checkout@v4
 
@@ -85,5 +98,5 @@ jobs:
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: actions/upload-artifact@v4
         with:
-          name: actrix-linux-x86_64
-          path: target/release/actrix
+          name: ${{ matrix.platform.artifact_name }}
+          path: ${{ matrix.platform.binary_path }}
