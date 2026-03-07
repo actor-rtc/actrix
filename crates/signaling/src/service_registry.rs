@@ -1555,4 +1555,84 @@ mod tests {
         assert_eq!(acme_only.len(), 1);
         assert_eq!(acme_only[0].actor_id.r#type.manufacturer, "acme");
     }
+
+    /// 复现 Ghost Candidates Bug：
+    ///
+    /// 真实场景：actrix 重启后 restore_from_storage() 把 ActorId A（serial=xxx1）放进内存，
+    /// 随后新服务进程启动，AIS 分配新 ActorId B（serial=xxx2），调用 register_service_full()，
+    /// 由于没有去重检查，内存里同时存在 A（幽灵）和 B（真实），service_name 相同。
+    ///
+    /// 期望 (Bug 存在时)：find_by_actr_type 返回 2 个候选（A + B）。
+    /// 期望 (Bug 修复后)：find_by_actr_type 返回 1 个候选（只有 B）。
+    #[test]
+    fn test_ghost_candidates_double_register_same_actor_id() {
+        let mut registry = ServiceRegistry::new();
+
+        let actr_type = ActrType {
+            manufacturer: "acme".to_string(),
+            name: "EchoService".to_string(),
+            version: Some("0.0.1".to_string()),
+        };
+
+        // ActorId A：来自 SQLite 恢复（actrix 重启时 restore_from_storage 加载）
+        let actor_id_a = ActrId {
+            serial_number: 11111, // 旧 serial
+            realm: actr_protocol::Realm { realm_id: 1 },
+            r#type: actr_type.clone(),
+        };
+
+        // ActorId B：新服务进程注册，AIS 分配的新 serial
+        let actor_id_b = ActrId {
+            serial_number: 22222, // 新 serial，与 A 不同
+            realm: actr_protocol::Realm { realm_id: 1 },
+            r#type: actr_type.clone(),
+        };
+
+        // 第一次注册：模拟 actrix 重启后 restore_from_storage() 加载 ActorId A
+        registry
+            .register_service_full(
+                actor_id_a.clone(),
+                "EchoService".to_string(),
+                vec!["echo.EchoRequest".to_string()],
+                None,
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+
+        let candidates = registry.find_by_actr_type(&actr_type);
+        assert_eq!(
+            candidates.len(),
+            1,
+            "第一次注册（ActorId A）后应只有 1 个候选"
+        );
+
+        // 第二次注册：模拟新服务进程启动，AIS 分配新 ActorId B，调用 register_service_full
+        // 内存里已有 A（幽灵），B 直接 push → 产生 2 条
+        registry
+            .register_service_full(
+                actor_id_b.clone(),
+                "EchoService".to_string(),
+                vec!["echo.EchoRequest".to_string()],
+                None,
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+
+        let candidates_after = registry.find_by_actr_type(&actr_type);
+
+        // Bug 存在时：内存 [ActorId A（幽灵）, ActorId B（真实）] → 返回 2 个候选 → FAIL
+        // Bug 修复后：注册 B 时清除旧条目 → 只保留 B → 返回 1 个候选 → PASS
+        assert_eq!(
+            candidates_after.len(),
+            1,
+            "[BUG DETECTED] 注册 ActorId B（serial=22222）后内存同时存在 ActorId A（serial=11111，幽灵）和 B，\
+             find_by_actr_type 返回 {} 个候选，应为 1。\
+             \n原因：register_service_full() 没有清除同 service_name 下的旧条目（不同 actor_id）。",
+            candidates_after.len()
+        );
+    }
 }
